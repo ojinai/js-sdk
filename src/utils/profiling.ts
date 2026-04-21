@@ -6,7 +6,6 @@ export class FPSTracker {
   private partialFrames = 0;
   private lastPartialTime: number;
   private totalPartialTime = 0;
-  private isRunning = false;
 
   readonly fpsHistory: number[] = [];
   readonly partialFpsHistory: number[] = [];
@@ -17,16 +16,14 @@ export class FPSTracker {
     this.start();
   }
 
-  /** Mark the tracker as running and reset timing baselines. */
+  /** Reset timing baselines so the next `update()` measures from now. */
   start(): void {
-    this.isRunning = true;
     this.lastUpdateTime = performance.now() - 40;
     this.lastPartialTime = performance.now() - 40;
   }
 
   /** Stop tracking and reset all counters. */
   stop(): void {
-    this.isRunning = false;
     this.partialFpsHistory.length = 0;
     this.fpsHistory.length = 0;
     this.partialFrames = 0;
@@ -92,6 +89,7 @@ interface LatencyMeasure {
 }
 
 /** Tracker that collects latency measurements by ID. */
+// biome-ignore lint/complexity/noStaticOnlyClass: PLAN.md §6.1 / ost-z6c3 restructures profiling as a subpath — module-function conversion happens there.
 export class LatencyTracker {
   private static measures: Map<string, LatencyMeasure[]> = new Map();
   private static sampleCounts: Map<string, number> = new Map();
@@ -161,19 +159,17 @@ export class LatencyTracker {
   static average(measureId: string): number {
     const count = LatencyTracker.sampleCounts.get(measureId) ?? 0;
     if (count === 0) return 0;
-    return LatencyTracker.sampleTotals.get(measureId)! / count;
+    return (LatencyTracker.sampleTotals.get(measureId) ?? 0) / count;
   }
 
   /** Return the maximum latency (in ms) for the given measure ID. */
   static max(measureId: string): number {
-    if ((LatencyTracker.sampleCounts.get(measureId) ?? 0) === 0) return 0;
-    return LatencyTracker.sampleMax.get(measureId)!;
+    return LatencyTracker.sampleMax.get(measureId) ?? 0;
   }
 
   /** Return the minimum latency (in ms) for the given measure ID. */
   static min(measureId: string): number {
-    if ((LatencyTracker.sampleCounts.get(measureId) ?? 0) === 0) return 0;
-    return LatencyTracker.sampleMin.get(measureId)!;
+    return LatencyTracker.sampleMin.get(measureId) ?? 0;
   }
 
   /** Log statistics for all measures. */

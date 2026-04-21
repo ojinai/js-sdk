@@ -173,8 +173,9 @@ export class OjinClient {
       return null;
     }
 
-    if (this.responseQueue.length > 0) {
-      return this.responseQueue.shift()!;
+    const queued = this.responseQueue.shift();
+    if (queued !== undefined) {
+      return queued;
     }
 
     return new Promise<OjinMessage | null>((resolve) => {
@@ -276,8 +277,8 @@ export class OjinClient {
   }
 
   private enqueueResponse(msg: OjinMessage): void {
-    if (this.responseResolvers.length > 0) {
-      const resolver = this.responseResolvers.shift()!;
+    const resolver = this.responseResolvers.shift();
+    if (resolver !== undefined) {
       resolver(msg);
     } else {
       this.responseQueue.push(msg);

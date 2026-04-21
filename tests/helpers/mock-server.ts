@@ -151,7 +151,8 @@ export class MockInferenceProxy {
   /** Get the port the server is listening on. */
   get address(): string {
     const addr = this.wss.address();
+    if (addr === null) throw new Error("MockServer is not listening");
     if (typeof addr === "string") return addr;
-    return `ws://127.0.0.1:${(addr as any).port}`;
+    return `ws://127.0.0.1:${addr.port}`;
   }
 }
