@@ -12,12 +12,13 @@ export {
   FrameType,
   OjinAudioInputMessage,
   OjinCancelInteractionMessage,
+  OjinClientMessage,
   OjinEndInteractionMessage,
   OjinErrorResponseMessage,
   OjinInteractionResponseMessage,
   OjinMessage,
+  OjinServerMessage,
   OjinSessionReadyMessage,
-  OjinSessionReadyPing,
   OjinTextInputMessage,
 } from "./protocol/client-messages.js";
 export type {

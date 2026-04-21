@@ -3,6 +3,7 @@ import { OjinEvent, OjinEventEmitter } from "./events.js";
 import {
   OjinAudioInputMessage,
   OjinCancelInteractionMessage,
+  type OjinClientMessage,
   OjinEndInteractionMessage,
   OjinErrorResponseMessage,
   OjinInteractionResponseMessage,
@@ -133,15 +134,14 @@ export class OjinClient {
     this.drainResponseMessages();
   }
 
-  async sendMessage(message: OjinMessage): Promise<void> {
+  async sendMessage(message: OjinClientMessage): Promise<void> {
     this.ensureConnected();
 
     if (message instanceof OjinCancelInteractionMessage) {
       this._cancelled = true;
-      const cancelPayload = message.toProxyMessage() as Record<string, unknown>;
       const cancelMsg = {
         type: MessageType.CancelInteraction,
-        payload: cancelPayload,
+        payload: message.toMessage() as Record<string, unknown>,
       };
       this.wsSend(JSON.stringify(cancelMsg));
       this.drainResponseMessages();
@@ -160,8 +160,7 @@ export class OjinClient {
     }
 
     if (message instanceof OjinEndInteractionMessage) {
-      const proxyMsg = message.toProxyMessage();
-      this.wsSend(JSON.stringify(proxyMsg));
+      this.wsSend(JSON.stringify(message.toMessage()));
       return;
     }
 

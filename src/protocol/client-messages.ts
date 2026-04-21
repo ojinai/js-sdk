@@ -20,38 +20,63 @@ export enum FrameType {
   Speech = 1,
 }
 
-// ─── Base message ─────────────────────────────────────────────────────────────
+// ─── Base messages ────────────────────────────────────────────────────────────
 
 /** Base class for all Ojin STV messages. */
-export abstract class OjinMessage {
-  /** Convert the message to a proxy message format. */
-  abstract toProxyMessage(): unknown;
+export abstract class OjinMessage {}
+
+/**
+ * Base class for client-bound (outgoing) Ojin messages.
+ *
+ * Carries the two serialization methods required to send a message over the
+ * wire: `toMessage()` for the logical shape (useful for debug logging) and
+ * `toBytes()` for the actual wire encoding.
+ *
+ * The `declare` brand is a compile-time-only nominal tag that prevents
+ * `OjinClientMessage` from being structurally assignable to `OjinServerMessage`
+ * (and vice-versa), which would otherwise be possible because TypeScript uses
+ * structural subtyping for classes.
+ */
+export abstract class OjinClientMessage extends OjinMessage {
+  private declare readonly _ojinMessageKind: "client";
+
+  /** Convert the message to its logical shape (for debug logging). */
+  abstract toMessage(): unknown;
+  /** Serialize the message to its wire form. */
+  abstract toBytes(): string | Uint8Array;
+}
+
+/**
+ * Marker base class for server-bound (incoming) Ojin messages.
+ *
+ * Server messages are received from the proxy; they cannot be serialized and
+ * sent by the client.  Keeping them on a separate branch of the hierarchy lets
+ * the compiler reject any attempt to pass a server message to
+ * `OjinClient.sendMessage`.
+ *
+ * The `declare` brand (see `OjinClientMessage`) makes this class nominally
+ * distinct from `OjinClientMessage` at the type level.
+ */
+export abstract class OjinServerMessage extends OjinMessage {
+  private declare readonly _ojinMessageKind: "server";
 }
 
 // ─── Session ready ────────────────────────────────────────────────────────────
 
 /** Message indicating that a session is ready. */
-export class OjinSessionReadyMessage extends OjinMessage {
+export class OjinSessionReadyMessage extends OjinServerMessage {
   constructor(public readonly parameters: Record<string, unknown> | null) {
     super();
-  }
-
-  toProxyMessage(): unknown {
-    throw new Error("Method not implemented.");
   }
 }
 
 /** Ping message used to check session readiness. */
-export class OjinSessionReadyPing extends OjinMessage {
-  toProxyMessage(): unknown {
-    throw new Error("Method not implemented.");
-  }
-}
+export class OjinSessionReadyPing extends OjinServerMessage {}
 
 // ─── Interaction response ─────────────────────────────────────────────────────
 
 /** Response message containing video/audio data from the persona. */
-export class OjinInteractionResponseMessage extends OjinMessage {
+export class OjinInteractionResponseMessage extends OjinServerMessage {
   constructor(
     public readonly interactionId: string,
     public readonly videoFrameBytes: Uint8Array<ArrayBuffer>,
@@ -90,27 +115,31 @@ export class OjinInteractionResponseMessage extends OjinMessage {
       frameType,
     );
   }
-
-  toProxyMessage(): unknown {
-    throw new Error("Method not implemented.");
-  }
 }
 
 // ─── Cancel interaction ───────────────────────────────────────────────────────
 
 /** Message to cancel an interaction. */
-export class OjinCancelInteractionMessage extends OjinMessage {
-  toProxyMessage(): CancelInteractionInput {
+export class OjinCancelInteractionMessage extends OjinClientMessage {
+  toMessage(): CancelInteractionInput {
     return {
       timestamp: Date.now(),
     };
+  }
+
+  /** Serialize to JSON wire format. */
+  toBytes(): string {
+    return JSON.stringify({
+      type: MessageType.CancelInteraction,
+      payload: this.toMessage(),
+    });
   }
 
   /** Create the full cancel message wrapper. */
   toCancelInteractionMessage(): CancelInteractionMessage {
     return {
       type: MessageType.CancelInteraction,
-      payload: this.toProxyMessage() as CancelInteractionInput,
+      payload: this.toMessage(),
     };
   }
 }
@@ -118,8 +147,8 @@ export class OjinCancelInteractionMessage extends OjinMessage {
 // ─── End interaction ──────────────────────────────────────────────────────────
 
 /** Message to end an interaction. */
-export class OjinEndInteractionMessage extends OjinMessage {
-  toProxyMessage(): EndInteractionMessage {
+export class OjinEndInteractionMessage extends OjinClientMessage {
+  toMessage(): EndInteractionMessage {
     return {
       type: MessageType.EndInteraction,
       payload: {
@@ -127,12 +156,17 @@ export class OjinEndInteractionMessage extends OjinMessage {
       },
     };
   }
+
+  /** Serialize to JSON wire format. */
+  toBytes(): string {
+    return JSON.stringify(this.toMessage());
+  }
 }
 
 // ─── Text input ───────────────────────────────────────────────────────────────
 
 /** Message containing text input for the persona. */
-export class OjinTextInputMessage extends OjinMessage {
+export class OjinTextInputMessage extends OjinClientMessage {
   constructor(
     public readonly text: string,
     public readonly params?: Record<string, unknown> | null,
@@ -140,7 +174,7 @@ export class OjinTextInputMessage extends OjinMessage {
     super();
   }
 
-  toProxyMessage(): InteractionInputMessage {
+  toMessage(): InteractionInputMessage {
     return {
       type: MessageType.InteractionInput,
       payload: {
@@ -154,14 +188,14 @@ export class OjinTextInputMessage extends OjinMessage {
 
   /** Serialize to binary format. */
   toBytes(): Uint8Array {
-    return serializeInteractionInputMessage(this.toProxyMessage());
+    return serializeInteractionInputMessage(this.toMessage());
   }
 }
 
 // ─── Audio input ─────────────────────────────────────────────────────────────
 
 /** Message containing audio input for the persona. */
-export class OjinAudioInputMessage extends OjinMessage {
+export class OjinAudioInputMessage extends OjinClientMessage {
   constructor(
     public readonly audioInt16Bytes: Uint8Array<ArrayBuffer>,
     public readonly params?: Record<string, unknown> | null,
@@ -169,7 +203,7 @@ export class OjinAudioInputMessage extends OjinMessage {
     super();
   }
 
-  toProxyMessage(): InteractionInputMessage {
+  toMessage(): InteractionInputMessage {
     return {
       type: MessageType.InteractionInput,
       payload: {
@@ -183,19 +217,15 @@ export class OjinAudioInputMessage extends OjinMessage {
 
   /** Serialize to binary format. */
   toBytes(): Uint8Array {
-    return serializeInteractionInputMessage(this.toProxyMessage());
+    return serializeInteractionInputMessage(this.toMessage());
   }
 }
 
 // ─── Error response ───────────────────────────────────────────────────────────
 
 /** Error response message received from the server. */
-export class OjinErrorResponseMessage extends OjinMessage {
+export class OjinErrorResponseMessage extends OjinServerMessage {
   constructor(public readonly error: ErrorResponse) {
     super();
-  }
-
-  toProxyMessage(): unknown {
-    return this.error;
   }
 }

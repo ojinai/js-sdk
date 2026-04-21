@@ -82,7 +82,7 @@ describe("OjinCancelInteractionMessage", () => {
 describe("OjinEndInteractionMessage", () => {
   it("should produce an end interaction message", () => {
     const msg = new OjinEndInteractionMessage();
-    const proxy = msg.toProxyMessage();
+    const proxy = msg.toMessage();
 
     expect(proxy.type).toBe(MessageType.EndInteraction);
     expect(proxy.payload.timestamp).toBeTypeOf("number");
@@ -100,7 +100,7 @@ describe("OjinTextInputMessage", () => {
 
   it("should produce a proxy message with text payload", () => {
     const msg = new OjinTextInputMessage("Hello");
-    const proxy = msg.toProxyMessage();
+    const proxy = msg.toMessage();
 
     expect(proxy.type).toBe(MessageType.InteractionInput);
     expect(proxy.payload.payloadType).toBe("text");
@@ -120,7 +120,7 @@ describe("OjinAudioInputMessage", () => {
   it("should produce a proxy message with audio payload", () => {
     const audioData = new Uint8Array([0, 1, 2, 3]);
     const msg = new OjinAudioInputMessage(audioData, { sampleRate: 16000 });
-    const proxy = msg.toProxyMessage();
+    const proxy = msg.toMessage();
 
     expect(proxy.type).toBe(MessageType.InteractionInput);
     expect(proxy.payload.payloadType).toBe("audio");
