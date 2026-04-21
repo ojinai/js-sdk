@@ -1,0 +1,1 @@
+{"type":"sessionReady","payload":{"traceId":"trace-abc123","status":"ready","load":0.5,"timestamp":1000000000,"parameters":null,"numClients":1,"maxCapacity":10}}

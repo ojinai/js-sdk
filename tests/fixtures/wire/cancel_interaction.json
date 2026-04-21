@@ -1,0 +1,14 @@
+{
+  "fixtureName": "cancel_interaction",
+  "pythonSdkVersion": "0.3.0",
+  "messageShape": "CancelInteraction / JSON",
+  "direction": "client-to-server",
+  "encoding": "json-utf8",
+  "fields": {
+    "type": "cancelInteraction",
+    "timestampMs": 1000000000
+  },
+  "expectedRoundTrip": {
+    "type": "cancelInteraction"
+  }
+}

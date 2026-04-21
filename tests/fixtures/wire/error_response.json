@@ -1,0 +1,21 @@
+{
+  "fixtureName": "error_response",
+  "pythonSdkVersion": "0.3.0",
+  "messageShape": "ErrorResponse / JSON / server-to-client",
+  "direction": "server-to-client",
+  "encoding": "json-utf8",
+  "fields": {
+    "interactionId": null,
+    "code": "INTERNAL_ERROR",
+    "message": "An internal error occurred",
+    "details": null,
+    "timestamp": 1000000000
+  },
+  "expectedRoundTrip": {
+    "type": "errorResponse",
+    "code": "INTERNAL_ERROR",
+    "message": "An internal error occurred",
+    "interactionId": null,
+    "details": null
+  }
+}

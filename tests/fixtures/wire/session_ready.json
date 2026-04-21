@@ -1,0 +1,25 @@
+{
+  "fixtureName": "session_ready",
+  "pythonSdkVersion": "0.3.0",
+  "messageShape": "SessionReady / JSON / server-to-client",
+  "direction": "server-to-client",
+  "encoding": "json-utf8",
+  "fields": {
+    "traceId": "trace-abc123",
+    "status": "ready",
+    "load": 0.5,
+    "timestamp": 1000000000,
+    "parameters": null,
+    "numClients": 1,
+    "maxCapacity": 10
+  },
+  "expectedRoundTrip": {
+    "type": "sessionReady",
+    "traceId": "trace-abc123",
+    "status": "ready",
+    "load": 0.5,
+    "parameters": null,
+    "numClients": 1,
+    "maxCapacity": 10
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "fixtureName": "audio_input",
+  "pythonSdkVersion": "0.3.0",
+  "messageShape": "InteractionInput / audio / no params",
+  "direction": "client-to-server",
+  "encoding": "binary",
+  "fields": {
+    "payloadType": "audio",
+    "timestampMs": 1000000000,
+    "params": null,
+    "audioBytes": [0, 0, 1, 0, 255, 127, 0, 128]
+  },
+  "expectedRoundTrip": {
+    "type": "interactionInput",
+    "payloadType": "audio",
+    "params": null
+  }
+}

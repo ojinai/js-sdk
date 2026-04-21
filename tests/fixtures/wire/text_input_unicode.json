@@ -1,0 +1,23 @@
+{
+  "fixtureName": "text_input_unicode",
+  "pythonSdkVersion": "0.3.0",
+  "messageShape": "InteractionInput / text / params with unicode payload",
+  "direction": "client-to-server",
+  "encoding": "binary",
+  "fields": {
+    "payloadType": "text",
+    "timestampMs": 1000000000,
+    "params": {
+      "language": "ja"
+    },
+    "text": "こんにちは"
+  },
+  "expectedRoundTrip": {
+    "type": "interactionInput",
+    "payloadType": "text",
+    "text": "こんにちは",
+    "params": {
+      "language": "ja"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "fixtureName": "interaction_response_audio",
+  "pythonSdkVersion": "0.3.0",
+  "messageShape": "InteractionResponse / binary / audio payload / idle (nil UUID)",
+  "direction": "server-to-client",
+  "encoding": "binary",
+  "fields": {
+    "isFinalResponse": true,
+    "interactionId": "00000000-0000-0000-0000-000000000000",
+    "timestampMs": 1000000000,
+    "usage": 0,
+    "index": 0,
+    "payloads": [
+      {
+        "payloadType": "audio",
+        "dataBytes": [0, 0, 1, 0, 255, 127, 0, 128]
+      }
+    ]
+  },
+  "expectedRoundTrip": {
+    "type": "interactionResponse",
+    "interactionId": "00000000-0000-0000-0000-000000000000",
+    "isFinalResponse": true,
+    "usage": 0,
+    "index": 0,
+    "payloadTypes": ["audio"]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "fixtureName": "text_input",
+  "pythonSdkVersion": "0.3.0",
+  "messageShape": "InteractionInput / text / no params",
+  "direction": "client-to-server",
+  "encoding": "binary",
+  "fields": {
+    "payloadType": "text",
+    "timestampMs": 1000000000,
+    "params": null,
+    "text": "Hello, Ojin!"
+  },
+  "expectedRoundTrip": {
+    "type": "interactionInput",
+    "payloadType": "text",
+    "text": "Hello, Ojin!",
+    "params": null
+  }
+}
