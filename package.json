@@ -24,6 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
+    "test:wire-compat": "vitest run tests/fixtures/wire.test.ts",
     "lint": "biome check src/ tests/",
     "lint:fix": "biome check --fix src/ tests/",
     "format": "biome format --write src/ tests/",
@@ -42,7 +43,7 @@
   "license": "Apache-2.0",
   "homepage": "https://github.com/journee-live/ojin",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20"
   },
   "dependencies": {
     "ws": "^8.18.0"
