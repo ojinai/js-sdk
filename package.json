@@ -32,7 +32,7 @@
     "precommit": "pnpm lint:check && pnpm typecheck && pnpm test",
     "prepush": "pnpm precommit && pnpm security",
     "security": "pnpm security:secrets && pnpm security:sast && pnpm security:audit",
-    "security:secrets": "gitleaks detect --redact --no-banner",
+    "security:secrets": "betterleaks git --redact --no-banner",
     "security:sast": "semgrep scan --config=auto --error --quiet",
     "security:audit": "pnpm audit --audit-level=moderate",
     "clean": "rm -rf dist coverage",
