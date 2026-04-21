@@ -54,6 +54,7 @@ export class OjinEventEmitter {
       try {
         (callback as (...args: unknown[]) => void)(...args);
       } catch (err) {
+        // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- `event` is typed as OjinEvent (enum), not user input; ost-a8h9 removes this raw console.* entirely in favour of the injected logger (PLAN.md §5.3 / D8, D17).
         console.error(`Error in ${event} event handler:`, err);
       }
     });
