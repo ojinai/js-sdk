@@ -169,10 +169,13 @@ All SDK errors extend `OjinError` and carry a `.code: OjinErrorCode` field plus 
 
 ```bash
 pnpm install
-pnpm run build       # CJS + ESM output
-pnpm test            # Run tests
-pnpm run lint:fix    # Lint and fix
-pnpm run typecheck   # Type-check only
+pnpm run build         # CJS + ESM output
+pnpm test              # Run tests
+pnpm run lint          # Lint + format (auto-fix)
+pnpm run lint:check    # Lint + format (read-only; what CI runs)
+pnpm run typecheck     # Type-check only
+pnpm run precommit     # Fast local gate (lint:check + typecheck)
+pnpm run prepush       # Full local gate (lint:check + typecheck + test)
 ```
 
 ## License

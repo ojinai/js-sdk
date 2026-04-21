@@ -45,7 +45,7 @@ Keep the summary line ≤ 72 characters. Use the commit body for _why_, not _wha
 4. All CI checks must be **green** before a PR can be merged:
    - `pnpm run typecheck` — TypeScript must compile without errors
    - `pnpm test` — all tests must pass
-   - `pnpm run lint` — Biome lint and format checks must pass
+   - `pnpm run lint:check` — Biome lint and format checks must pass (use `pnpm run lint` locally to auto-fix)
 5. At least one maintainer review is required before merge.
 
 Prefer small, focused PRs — they are easier to review and faster to land.

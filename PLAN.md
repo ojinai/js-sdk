@@ -921,7 +921,7 @@ Anticipated objections from the external reviewer, pre-answered.
 - [ ] TypeDoc site publishes in CI.
 - [ ] 10-minute soak test at simulated stream rate runs without unbounded RSS growth (numeric target set in v1.5 after baseline measurement).
 - [ ] Wire-compat fixture tests pass against Python SDK-captured binary frames.
-- [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test:cov` all green in CI.
+- [ ] `pnpm lint:check`, `pnpm typecheck`, `pnpm test:cov` all green in CI.
 - [ ] CHANGELOG entry listing every fix with D-number reference, migration-guide pointers for the renamed options (§11.1), **and a prominent "v0.1 → v1.0: browser path removed" entry** with rationale.
 - [ ] SECURITY.md and CONTRIBUTING.md in place.
 
