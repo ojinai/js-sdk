@@ -2,13 +2,10 @@ import commonjs from "@rollup/plugin-commonjs";
 import resolve from "@rollup/plugin-node-resolve";
 import typescript from "@rollup/plugin-typescript";
 
-const sharedPlugins = [
-  resolve({ browser: true }),
-  commonjs(),
-];
+const sharedPlugins = [resolve(), commonjs()];
 
 export default [
-  // ESM build
+  // ESM build (Node)
   {
     input: "src/index.ts",
     output: {
@@ -29,7 +26,7 @@ export default [
     ],
     external: ["ws"],
   },
-  // CJS build
+  // CJS build (Node)
   {
     input: "src/index.ts",
     output: {

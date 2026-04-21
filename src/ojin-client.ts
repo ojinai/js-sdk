@@ -76,7 +76,7 @@ export class OjinClient {
         const url = `${this.wsUrl}?config_id=${this.configId}${this.mode === "dev" ? `&mode=${this.mode}` : ""}`;
         const headers: Record<string, string> = { Authorization: this.apiKey };
 
-        this.transport = await createWSTransport();
+        this.transport = createWSTransport();
 
         this.transport.onMessage((data, isBinary) => {
           this.handleMessage(data, isBinary);

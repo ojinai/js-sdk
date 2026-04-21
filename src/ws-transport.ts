@@ -1,47 +1,26 @@
 /**
- * Isomorphic WebSocket transport interface.
+ * Node WebSocket transport (server-side only).
  *
- * In the browser, this wraps the native `WebSocket` API.
- * In Node.js, this wraps the `ws` package.
- * The OjinClient only depends on this interface, keeping
- * the rest of the code platform-agnostic.
+ * @ojinai/js-sdk v1.0 is a Node-only SDK. Apps must consume this from their
+ * own backend and expose their own client-facing transport. The SDK must not
+ * be loaded in a browser or any untrusted runtime; no browser WebSocket
+ * implementation is shipped. See PLAN.md §2.2 and §4.1.
  */
 
-/** Platform-agnostic WebSocket transport. */
+import WebSocket from "ws";
+
 export interface WSTransport {
-  /** Connect to the server at the given URL. */
   connect(url: string, headers: Record<string, string>): Promise<void>;
-  /** Send a string or binary message. */
   send(data: string | Uint8Array): void;
-  /** Close the connection. */
   close(): void;
-  /** Register a handler for incoming messages. */
   onMessage(handler: (data: Uint8Array, isBinary: boolean) => void): void;
-  /** Register a handler for connection close events. */
   onClose(handler: (code: number, reason: string) => void): void;
-  /** Register a handler for connection errors. */
   onError(handler: (err: Error) => void): void;
-  /** Whether the underlying socket is open. */
   readonly isOpen: boolean;
-  /** Enable TCP_NODELAY for lower latency (no-op in browser). */
   setNoDelay(): void;
 }
 
-/** Create a WebSocket transport for the current platform. */
-export async function createWSTransport(): Promise<WSTransport> {
-  if (isBrowser()) {
-    return new BrowserWSTransport();
-  }
-  const { NodeWSTransport } = await import("./ws-transport-node.js");
-  return new NodeWSTransport();
-}
-
-function isBrowser(): boolean {
-  return typeof window !== "undefined" && typeof window.WebSocket !== "undefined";
-}
-
-/** Browser WebSocket transport using the native WebSocket API. */
-class BrowserWSTransport implements WSTransport {
+class NodeWSTransport implements WSTransport {
   private ws: WebSocket | null = null;
   private messageHandler: ((data: Uint8Array, isBinary: boolean) => void) | null = null;
   private closeHandler: ((code: number, reason: string) => void) | null = null;
@@ -51,54 +30,27 @@ class BrowserWSTransport implements WSTransport {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
-  async connect(url: string, _headers: Record<string, string>): Promise<void> {
-    // Browser WebSocket doesn't support custom headers.
-    // Auth must be passed via URL params or subprotocol.
+  async connect(url: string, headers: Record<string, string>): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(url);
-      ws.binaryType = "arraybuffer";
+      const ws = new WebSocket(url, { headers });
 
-      const onOpen = () => {
-        cleanup();
-        resolve();
-      };
-
-      const onError = (ev: Event) => {
-        cleanup();
-        const err = new Error(`WebSocket error: ${ev.type}`);
+      ws.on("open", () => resolve());
+      ws.on("error", (err: Error) => {
         reject(err);
-        if (this.errorHandler) this.errorHandler(err);
-      };
-
-      const onClose = (ev: CloseEvent) => {
-        cleanup();
-        if (this.closeHandler) this.closeHandler(ev.code, ev.reason);
-      };
-
-      const onMessage = (ev: MessageEvent) => {
-        if (!this.messageHandler) return;
-        if (ev.data instanceof ArrayBuffer) {
-          this.messageHandler(new Uint8Array(ev.data), true);
-        } else if (typeof ev.data === "string") {
-          this.messageHandler(new TextEncoder().encode(ev.data), false);
-        } else if (ev.data instanceof Blob) {
-          ev.data.arrayBuffer().then((buf: ArrayBuffer) => {
-            if (this.messageHandler) this.messageHandler(new Uint8Array(buf), true);
-          });
+        this.errorHandler?.(err);
+      });
+      ws.on("close", (code: number, reason: Buffer) => {
+        this.closeHandler?.(code, reason.toString("utf-8"));
+      });
+      ws.on("message", (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
+        if (this.messageHandler) {
+          const bytes =
+            data instanceof Buffer
+              ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+              : new Uint8Array(data as ArrayBuffer);
+          this.messageHandler(bytes, isBinary);
         }
-      };
-
-      const cleanup = () => {
-        ws.removeEventListener("open", onOpen);
-        ws.removeEventListener("error", onError);
-        ws.removeEventListener("close", onClose);
-        ws.removeEventListener("message", onMessage);
-      };
-
-      ws.addEventListener("open", onOpen);
-      ws.addEventListener("error", onError);
-      ws.addEventListener("close", onClose);
-      ws.addEventListener("message", onMessage);
+      });
 
       this.ws = ws;
     });
@@ -126,6 +78,17 @@ class BrowserWSTransport implements WSTransport {
   }
 
   setNoDelay(): void {
-    // No-op in browser — TCP_NODELAY is not available
+    if (!this.ws) return;
+    try {
+      const socket = (this.ws as unknown as { _socket?: { setNoDelay?: (v: boolean) => void } })
+        ._socket;
+      socket?.setNoDelay?.(true);
+    } catch {
+      // Ignore TCP_NODELAY failures; not critical.
+    }
   }
+}
+
+export function createWSTransport(): WSTransport {
+  return new NodeWSTransport();
 }

@@ -1,9 +1,32 @@
 # Ojin TypeScript SDK — Implementation Plan
 
-**Status:** Draft for external review
+**Status:** Node-only v1.0 (scope-narrowed 2026-04-21)
 **Current version:** `0.1.0`
-**Target releases:** `1.0.0` (GA), `1.5.0` (session tokens + examples), `2.0.0` (structural + DOM helpers; telemetry deferred to here at earliest)
+**Target releases:** `1.0.0` (Node SDK for server-side integration), future browser support deferred
 **Reference SDKs reviewed:** Python `ojin-client` (in-tree), Anam AI `@anam-ai/js-sdk@4.12.0`, HeyGen `@heygen/liveavatar-web-sdk@0.0.13`
+
+---
+
+## Scope-Change Notice — 2026-04-21
+
+**v1.0 ships as a Node/server-only SDK.** Apps integrate it from their own backend and expose their own client-facing transport. Direct browser-to-Ojin WebSocket usage is withdrawn from this release.
+
+**Why:** The team has ruled out browser-direct usage of the Ojin WebSocket with API-key auth. API keys in URLs leak via referrer/logs/caches; raw WS has no jitter buffer, FEC, or congestion control for real-time audio; and the Ojin backend has no WebRTC / LiveKit / Daily ingress to build a production browser path against today.
+
+**What this supersedes throughout this document:**
+
+- §2.1 goal "works correctly in a browser" → Node-only; browser is a non-goal until a media-transport ingress exists backend-side.
+- §2.3 principle "Browser-first" → replaced by "Server-side first; no client-side WS runtime".
+- §3.1 v1.0 framing "Usable in production [from a browser] via query parameter with explicit `unsafe_` naming" → withdrawn; v1.0 is "Usable in production from a Node backend".
+- §4.1 "Fix browser auth (D1)" → out-of-scope; browser auth path is removed entirely, not fixed.
+- §6.1 "UMD bundle for `<script>` tag consumers" → out-of-scope for v1.0.
+- §7.4 "DOM helpers" → indefinite; no longer a v2.0 commitment.
+- §10.6 "CSP / Permissions-Policy / COEP deployment recipes" → out-of-scope for v1.0.
+- Defects D1, D18, D19 → superseded; see §1.2 annotations.
+
+The rest of the document (wire protocol, error mapping, reconnect, keepalive, queueing, logger, convenience senders, negative-path tests, etc.) still applies to the Node SDK.
+
+**When does browser support come back?** Only after the Ojin backend ships a real media-transport ingress (WebRTC / LiveKit / Daily). No fixed version is committed.
 
 ---
 
@@ -39,7 +62,7 @@ Every fix references a specific file and (where relevant) line range in the curr
 
 | # | Defect | Evidence | Priority |
 |---|---|---|---|
-| D1 | Browser auth silently fails — native `WebSocket` drops custom `Authorization` header; URL only has `config_id`. | `src/ojin-client.ts:76-77`, `src/ws-transport.ts:54-55` | **P0** |
+| D1 | ~~Browser auth silently fails — native `WebSocket` drops custom `Authorization` header; URL only has `config_id`.~~ **Superseded 2026-04-21:** browser transport removed entirely in Node-only v1.0; no auth path to fix. | `src/ojin-client.ts:76-77`, `src/ws-transport.ts:54-55` | *(superseded)* |
 | D2 | `toProxyMessage` throws on 4 of 8 message subclasses; type system cannot distinguish senders from receivers. | `src/protocol/client-messages.ts:39-42,46-49,94-96,198-200` | **P0** |
 | D3 | `receiveMessage()` is a Python-asyncio carry-over; duplicates the event path and grows an unbounded queue. Delete outright — events are the only delivery surface. | `src/ojin-client.ts:171-183, 278-285` | **P0** |
 | D4 | No reconnection on mid-session drop; initial `reconnectAttempts` is only for the first connect. | `src/ojin-client.ts:263-276` | **P1** |
@@ -56,21 +79,23 @@ Every fix references a specific file and (where relevant) line range in the curr
 | D15 | `handleMessage` silently discards non-JSON text frames (hitting `console.warn("Unknown message type")` for plain text) and swallows JSON parse failures. Flashhead-lite docs state the server sometimes sends plain-text errors (e.g. *"No backend servers available. Please try again later."*); Python handles that case explicitly at `ojin_client.py:241`. TS must do the same — wrap as `ProtocolError`, populate `details.rawMessage`, and emit `OjinEvent.Error`. | `src/ojin-client.ts:220-225, 257-259` | **P1** (promoted from P2 after docs review) |
 | D16 | Mode is stringly typed (`mode === "dev"`); no compile-time guard on valid values. | `src/ojin-client.ts:76`, `src/types.ts:21-22` | **P3** — replace with `type ConnectionMode = "dev" \| "production"` or enum pending §14 Q5. |
 | D17 | Event emitter uses raw `console.error` in its handler try/catch — invisible to embedders that set a silent logger. | `src/events.ts:54-57` | **P1** — FE-review finding 25. Emitter takes a logger reference at construction; route caught handler errors through `logger.error`. Grep-in-CI rule forbids raw `console.*` in `src/`. |
-| D18 | `FPSTracker` / `LatencyTracker` are exported from the default entry point; top-level `static Map` initialisers can defeat tree-shaking. | `src/index.ts:61`, `src/utils/profiling.ts:96-99` | **P1** — FE-review finding 15. Move to `@ojinai/js-sdk/profiling` subpath; convert `static` Map fields to lazy getters; CI test asserts default entry does not contain the class names. |
-| D19 | `unsafe_createClientWithApiKey` warn scope is unspecified — "once" could mean per process, per module load, or per call. | §4.1 | **P2** — FE-review finding 20. Specify: once per JS realm (module-scoped boolean guard). Route through the injected logger, not raw `console.warn`. **Do not** strip in production — this is a security signal, not a dev aid, and survives into the production UMD intact. |
+| D18 | `FPSTracker` / `LatencyTracker` are exported from the default entry point; top-level `static Map` initialisers can defeat tree-shaking. | `src/index.ts:61`, `src/utils/profiling.ts:96-99` | **P2 (downgraded 2026-04-21)** — Node-only consumers don't bundle-ship, so the tree-shaking motivation is gone. Keeping the move to a `/profiling` subpath as a hygiene/API-surface concern (optional, not GA-blocking); dropping the CI tree-shaking test. |
+| D19 | ~~`unsafe_createClientWithApiKey` warn scope is unspecified — "once" could mean per process, per module load, or per call.~~ **Superseded 2026-04-21:** `unsafe_createClientWithApiKey` is not shipped in Node-only v1.0; no warn behaviour to specify. | §4.1 | *(superseded)* |
 
 ### 1.3 Strategic gaps vs competitors
+
+**Note (2026-04-21):** Anam and HeyGen are browser-first SDKs fronting WebRTC/LiveKit transports. Since Node-only v1.0 explicitly does not target that surface, most of the original gap analysis no longer applies as a gap — it's a different product shape. The table is kept for context; "v1.0 / v1.5" markers reflect the pre-scope-change plan and are superseded by §2 where they conflict.
 
 | Gap | Anam | HeyGen | Our plan |
 |---|---|---|---|
 | Session-token auth (server-exchange flow) | Yes, primary | Yes, primary | **v1.5** (deferred) |
-| `streamToVideoElement(id)` / `attach(el)` DOM helpers | Yes (WebRTC → `MediaStream`) | Yes (LiveKit → `MediaStream`) | **v2.0 · L effort** (downgraded from XL after Q1 resolved to JPEG). `createImageBitmap` makes the video path trivial; audio jitter buffer is the main remaining work. See §7.4. |
+| `streamToVideoElement(id)` / `attach(el)` DOM helpers | Yes (WebRTC → `MediaStream`) | Yes (LiveKit → `MediaStream`) | ~~**v2.0**~~ **Deferred indefinitely** — browser surface only; see §7.4. |
 | Convenience methods (`talk`, `interrupt`, `sendUserMessage`, `addContext`) | Yes | Yes | **v1.0** |
 | Client metrics/telemetry | Yes (opt-out) | — | **Deferred past v1.5** — if shipped, off-by-default. |
 | Deprecation warnings on stale fields | Yes (`brainType`→`llmId`) | — | **v1.0** framework |
 | Dotted event namespace | — | `session.state_changed` etc. | **v1.0** (shipped native; v0.1 had no public consumers to migrate) |
-| UMD bundle for `<script>` tag | Yes (webpack) | Yes (rollup umd) | **v1.0** |
-| Monorepo / framework adapters | separate repo | Turbo monorepo | **v2.0** |
+| UMD bundle for `<script>` tag | Yes (webpack) | Yes (rollup umd) | ~~**v1.0**~~ **Out-of-scope** — browser only; see §6.1. |
+| Monorepo / framework adapters | separate repo | Turbo monorepo | **Deferred** alongside browser support. |
 | Auto-generated API reference site | — | TypeDoc | **v1.0** |
 
 ---
@@ -79,59 +104,62 @@ Every fix references a specific file and (where relevant) line range in the curr
 
 ### 2.1 Goals (v1.0)
 
-1. The SDK works correctly in a **browser** (not just Node) for both unauthenticated dev mode and authenticated prod mode.
+1. The SDK works correctly in **Node.js 20+** for server-side integration. Apps embed it in their own backend and expose their own client-facing transport.
 2. The public API surface is **small, predictable, and correctly typed** — no runtime-throwing methods exposed through the type system.
 3. **Single canonical consumption model**: events. Polling is legacy-only and clearly marked.
 4. **Connection lifecycle is robust**: reconnect on drop, keepalive, explicit ready state.
 5. **Error reporting is actionable**: typed error codes cover business conditions the integrator needs to branch on.
-6. **Documentation is sufficient for a new integrator** to ship a "hello world" without reading the source.
+6. **Documentation is sufficient for a new integrator** to ship a Node "hello world" without reading the source.
 7. The SDK is **observable**: consumers can inject a logger and catch every failure path.
 
 ### 2.2 Non-goals
 
-- Framework bindings (React hooks, Vue composables, Svelte stores) — v2.0 at earliest.
-- WebRTC transport — the protocol is WebSocket-based; no plans to change.
-- React Native support as a tier-1 target — will likely work via polyfills but is untested in 1.0.
+- **Direct browser / client-side use of the Ojin WebSocket.** Hard block from the team (2026-04-21). Deferred until the backend ships a real media-transport ingress (WebRTC / LiveKit / Daily); no version committed.
+- Framework bindings (React hooks, Vue composables, Svelte stores) — revisit only after browser support returns.
+- WebRTC transport at the SDK layer — the model-as-API protocol is WebSocket-based; WebRTC, if it happens, lives between a browser and a media-transport service, not between this SDK and Ojin.
+- React Native support — deferred alongside browser.
 - Server-side helpers (token-exchange microservice) — out of scope; documented as a snippet.
 - Breaking the binary wire protocol — any change here needs Python SDK + backend coordination.
 
 ### 2.3 Guiding principles
 
-- **Browser-first**, Node second. If a feature can't work in the browser, it must degrade gracefully or be behind an explicit flag.
+- **Server-side first; no client-side runtime.** The SDK must not be loaded in a browser, mobile app, or any untrusted runtime. Docs and examples only show Node integration patterns.
 - **Fail loud on bugs, fail soft on network** — bad code throws; flaky network retries.
-- **Never log secrets**. API keys and session tokens must be redactable or redacted by default.
+- **Never log secrets**. API keys must be redactable or redacted by default in logs and error messages.
 - **Deprecate, then delete**. v1.0→v1.5 never removes a public symbol; v2.0 is the planned break.
 - **No surprises in the event model**. Every public message has exactly one delivery path.
-- **Single-threaded event-loop assumption.** The SDK assumes a single-threaded JavaScript event loop. Public methods are not safe to call concurrently from multiple Web Workers against the same client instance; consumers must serialize access. If Web Worker support becomes a requirement (e.g. offloading frame decoding in v2.0), the state machine and queues will need an explicit audit.
+- **Single-threaded event-loop assumption.** The SDK assumes a single-threaded JavaScript event loop. Public methods are not safe to call concurrently from multiple worker threads against the same client instance; consumers must serialize access.
 
 ---
 
 ## 3. Release Plan
 
-### 3.1 v1.0.0 — "Usable in production"
+### 3.1 v1.0.0 — "Usable in production from a Node backend"
 
-Deliverables (all items marked "1.0" in this doc). No session tokens; API-key auth works in browser via query parameter with explicit `unsafe_` naming, matching Anam's convention.
+Deliverables (all items marked "1.0" in this doc, minus anything the 2026-04-21 scope-change notice supersedes). Node 20+ only; API-key auth via the `ws` package's `headers` option (server-side request, no browser). No session tokens. Browser support is withdrawn from v1.0.
 
-### 3.2 v1.5.0 — "Production-safe auth"
+### 3.2 v1.5.0 — "Production-safe auth" (Node-only)
 
-- Session-token auth (`createClient(token)`) alongside `unsafe_createClientWithApiKey(...)`.
-- Server-side token-exchange snippet in README + reference Express/Next handler.
+- Session-token auth (`createClient(token)`) alongside v1.0's header-auth factory. Token carried as `Authorization: Bearer <token>` on the Node-side upgrade request.
+- Server-side token-exchange reference snippet (Express handler, Next.js API route) — still targeted at Node consumers, intended as a pattern for apps fronting Ojin.
 - JWT decode & claim-based config validation.
-- Example projects (`examples/node-cli`, `examples/browser-vanilla`, `examples/react-next`) — promoted here from v1.0 to keep v1.0 scope focused.
+- Example projects: `examples/node-cli` (browser examples withdrawn alongside browser support).
 - Measurable performance targets committed (first-frame latency, reconnect recovery, soak-test memory budget — baselines set during v1.0 run, targets ratified here).
 
-### 3.3 v2.0.0 — "Structural + DOM helpers"
+### 3.3 ~~v2.0.0 — "Structural + DOM helpers"~~ — **Placeholder; direction TBD**
 
-- Monorepo split: `@ojinai/js-sdk` (core, already published in v1.0), `@ojinai/react` (new hooks package), `@ojinai/examples`.
-- **DOM helpers** `streamToVideoElement` / `streamToCanvas` (pending §14 Q1 frame-format decision). XL effort because we own the decode/paint path; not a one-liner like WebRTC-based competitors.
-- **Client metrics / telemetry**, if/when shipped: off-by-default, tiered (opt-in per embedder), with prior security + privacy review. Parked here — not a v1.5 requirement.
-- Operational maturity sections (observability dashboard, rollback procedure, release DRI, security review gate, accessibility posture) authored in the v2.0 run.
+The original v2.0 was built around DOM helpers and framework adapters for a browser SDK. Under the 2026-04-21 scope change, there is no browser SDK to build adapters for. v2.0 is deliberately left as a placeholder: if and when the Ojin backend ships a real media-transport ingress (WebRTC / LiveKit / Daily), re-plan v2.0 around that surface. Until then, continued iteration on the Node SDK (session tokens → observability → hardening) is the roadmap.
 
 ---
 
 ## 4. v1.0 — Critical fixes (P0)
 
-### 4.1 [P0 · Breaking · M · Med risk] Fix browser auth (D1)
+### 4.1 ~~[P0 · Breaking · M · Med risk] Fix browser auth (D1)~~ — **Superseded 2026-04-21**
+
+**This section is withdrawn.** The browser transport is removed in Node-only v1.0; there is no browser auth path to fix. Node-side auth continues to use the `Authorization` header via `ws`'s `headers` option. The remainder of this section is preserved as historical reference only.
+
+<details>
+<summary>Historical content (superseded)</summary>
 
 **Problem.** `new WebSocket(url)` in the browser has no API to set headers. The current code sends `Authorization: <apiKey>` only on the Node side; in the browser it's silently dropped and the server receives an unauthenticated connection that only carries `config_id`.
 
@@ -165,6 +193,8 @@ Deliverables (all items marked "1.0" in this doc). No session tokens; API-key au
 - Browser smoke test (happy-dom) asserting no header is passed and URL contains `api_key`.
 
 **Risk.** Backend must accept `api_key` query param. **Mitigation:** confirmed with backend team before merge (§14 Q2). If backend wants `Sec-WebSocket-Protocol` instead, swap implementation without changing factory signature.
+
+</details>
 
 ---
 
@@ -529,18 +559,18 @@ Raw `sendMessage` and message classes remain public for advanced users and Pytho
 
 ## 6. v1.0 — DX & Build
 
-### 6.1 [P1 · S] UMD bundle for `<script>` tag consumers
+### 6.1 ~~[P1 · S] UMD bundle for `<script>` tag consumers~~ — **Out-of-scope for v1.0 (2026-04-21)**
 
-Add a third Rollup entry producing `dist/umd/ojin.umd.js` (global `Ojin`), minified and source-mapped. Update `package.json` with `unpkg` and `jsdelivr` fields (HeyGen pattern). Package publishes as `@ojinai/js-sdk`; UMD filename kept short for `<script>` embedders.
+**Withdrawn.** Node-only v1.0 does not ship a `<script>`-tag bundle. Revisit only if browser support returns.
 
-**Public-surface narrowing (FE-review finding 26).** The current `src/index.ts` re-exports ~50 symbols, many of them low-level protocol internals (`serializeInteractionInputMessage`, `deserializeInteractionResponseMessage`, `bytesToUuid`, `uuidToBytes`, `NIL_UUID`, `payloadTypeFromStr`, `payloadTypeToStr`, `PayloadType`, `FPSTracker`, `LatencyTracker`, raw `MessageType` enum, and the full `SessionSetupMessage` / `SessionUpdateMessage` type aliases). Exposing these by default means every protocol refactor is a public-API break. Restructure `package.json` `exports` into subpaths:
+**Public-surface narrowing (still in-scope, retargeted as a hygiene concern for the Node package).** The current `src/index.ts` re-exports ~50 symbols, many of them low-level protocol internals (`serializeInteractionInputMessage`, `deserializeInteractionResponseMessage`, `bytesToUuid`, `uuidToBytes`, `NIL_UUID`, `payloadTypeFromStr`, `payloadTypeToStr`, `PayloadType`, `FPSTracker`, `LatencyTracker`, raw `MessageType` enum, and the full `SessionSetupMessage` / `SessionUpdateMessage` type aliases). Exposing these by default means every protocol refactor is a public-API break. Restructure `package.json` `exports` into subpaths:
 
-- `@ojinai/js-sdk` — default entry: the factory, `OjinClient`, 8 message classes, `OjinEvent` / `ConnectionState` / `DisconnectReason` enums, error classes, `OjinErrorCode` enum, `OjinLogger` interface, `OjinClientOptions` type. ~25 symbols.
+- `@ojinai/js-sdk` — default entry: the factory, `OjinClient`, message classes, `OjinEvent` / `ConnectionState` / `DisconnectReason` enums, error classes, `OjinErrorCode` enum, `OjinLogger` interface, `OjinClientOptions` type.
 - `@ojinai/js-sdk/protocol` — `serialize*` / `deserialize*` / `PayloadType` / raw `MessageType`. For advanced consumers building alternate transports.
 - `@ojinai/js-sdk/profiling` — `FPSTracker`, `LatencyTracker`.
 - `@ojinai/js-sdk/internal/uuid` — `bytesToUuid`, `uuidToBytes`, `NIL_UUID`. Prefixed `internal/` so consumers know it is not a stable surface.
 
-Each subpath has its own type-declaration file. Mass-importing from the top-level only drags in what's actually used.
+Each subpath has its own type-declaration file.
 
 ### 6.2 [P1 · M] TypeDoc-generated API reference
 
@@ -550,18 +580,14 @@ Each subpath has its own type-declaration file. Mass-importing from the top-leve
 
 ### 6.3 [Moved to v1.5] Example projects
 
-Moved out of v1.0 to keep the release focused. v1.5 will ship:
+Moved out of v1.0 to keep the release focused. v1.5 will ship a Node example:
 
 - `examples/node-cli/` — streams text input, logs response frame sizes.
-- `examples/browser-vanilla/` — single HTML file wiring the SDK via UMD.
-- `examples/react-next/` — minimal Next.js page using the SDK from `useEffect`.
-- Each example with its own `README.md`.
+- Browser examples (`browser-vanilla`, `react-next`) are withdrawn — deferred with browser support itself.
 
-v1.0 replacement for UMD verification: a CI smoke-test that loads `dist/umd/ojin.umd.js` into a headless-browser context (happy-dom or Playwright) and asserts `globalThis.Ojin` is populated and constructs without throwing.
+### 6.4 ~~[P1 · S] Build-time version injection~~ — **Out-of-scope for v1.0 (2026-04-21)**
 
-### 6.4 [P1 · S] Build-time version injection
-
-`src/version.ts` currently hand-edited (the comment at `src/version.ts:1` even claims it's auto-populated — it isn't). Replace with Rollup `@rollup/plugin-replace` injecting from `package.json.version` at build time. Applies identically to ESM, CJS, and UMD bundles. (This supersedes the original D18 defect; D18 is therefore folded here.)
+Node consumers can read the version from `package.json` directly if needed; no bundle-time injection required.
 
 ### 6.5 [P2 · S] Source-map validation
 
@@ -613,9 +639,14 @@ README section and `examples/token-exchange-server/` with:
 - Lower priority overall — the data is useful but not worth the compliance and design overhead in early GA.
 - Shape sketched previously (fire-and-forget `fetch`, single zero-dep file) is still the right direction; not committed here.
 
-### 7.4 [Moved to v2.0 · XL — upgraded from L after FE review] `streamToVideoElement(id)` / `streamToCanvas(el)` DOM helpers
+### 7.4 ~~[Moved to v2.0 · XL]~~ `streamToVideoElement(id)` / `streamToCanvas(el)` DOM helpers — **Deferred indefinitely (2026-04-21)**
 
-Why deferred: our WS transport delivers encoded frames + PCM audio, not a native `MediaStream`. Competitors (Anam via WebRTC, HeyGen via LiveKit) hand the browser a video codec stream and get painting / sync for free; we own the decode + paint + audio-jitter-buffer path.
+DOM helpers are only relevant to a browser build. Under Node-only v1.0 and the ruling against direct browser WS consumption, these are not on any version roadmap. Revisit only when browser support returns via a real media-transport ingress (WebRTC / LiveKit / Daily) — at which point rendering is likely delivered by the transport layer (e.g. a LiveKit `Room` + `VideoTrack`) rather than by this SDK.
+
+<details>
+<summary>Historical content (deferred)</summary>
+
+Why originally deferred to v2.0: our WS transport delivers encoded frames + PCM audio, not a native `MediaStream`. Competitors (Anam via WebRTC, HeyGen via LiveKit) hand the browser a video codec stream and get painting / sync for free; we own the decode + paint + audio-jitter-buffer path.
 
 **Frame format confirmed: JPEG** (flashhead-lite docs, Q1 resolved). Video-side decoding is straightforward via `createImageBitmap`. The hard parts are off-main-thread rendering and lip-sync; neither is a one-liner. FE-review findings 3 and 6 pushed the effort back from L to XL — the audio jitter buffer is a multi-week problem and main-thread rendering janks on mobile. Spec is now concrete.
 
@@ -638,6 +669,8 @@ Why deferred: our WS transport delivers encoded frames + PCM audio, not a native
 **Lip-sync acceptance criterion (committed in §15.3):** median audio-video offset ≤ 20 ms over a 60 s session, p95 ≤ 40 ms. Measured via the render stats stream.
 
 Could become simpler in the future if we add a WebRTC transport alongside the WS one — flagged as a long-term option under §8.3.
+
+</details>
 
 ## 8. v2.0 — Structural
 
@@ -732,24 +765,23 @@ Commit a directory of binary fixtures (`tests/fixtures/wire/`) captured from the
 
 ### 10.1 README rewrite (v1.0)
 
-Structure (mirroring Anam/HeyGen):
+Structure:
 
-1. One-paragraph positioning.
-2. Install.
-3. Quickstart (dev mode, `unsafe_createClientWithApiKey`).
-4. **Prominent "Production usage" section** — explicit v1.0 limitation: no session tokens yet, ship behind a server-side proxy until 1.5.
+1. One-paragraph positioning — **Node/server SDK**. Explicit "not for browser use" line up top.
+2. Install (`npm install @ojinai/js-sdk`, Node ≥ 20).
+3. Quickstart — Node server example: construct the client with an API key, listen for events, forward frames to the app's own client transport.
+4. **"Not for client-side use" callout** — API keys must stay on the server; do not bundle the SDK into a browser. Future browser support deferred until the backend ships a media-transport ingress.
 5. API reference pointer (TypeDoc site).
 6. Events table.
 7. Error codes table.
-8. Browser vs Node notes.
-9. Migration notes.
-10. License.
+8. Migration notes (v0.1 → v1.0, including the browser-path removal).
+9. License.
 
 ### 10.2 Docs site
 
 - TypeDoc → GitHub Pages or docs subdomain.
 - One-page "concepts" page: session, interaction, frame types, idle vs speech.
-- Recipes: capture audio from `getUserMedia`, paint frames to canvas, handle interruption from UI.
+- Recipes: Node-side audio ingestion (file / stream), forwarding frames to a downstream client transport, handling interruption from a control channel. (Browser-capture / canvas-paint recipes removed — they assumed direct client-side use.)
 
 ### 10.3 CHANGELOG
 
@@ -771,18 +803,9 @@ Structure (mirroring Anam/HeyGen):
 - Branch/PR flow.
 - Test requirements per change type.
 
-### 10.6 Deployment recipes — CSP, Permissions-Policy, COEP (FE-review finding 27)
+### 10.6 ~~Deployment recipes — CSP, Permissions-Policy, COEP~~ — **Out-of-scope for v1.0 (2026-04-21)**
 
-README subsection "Deploying behind strict CSP / Permissions-Policy" covering the minimum directives developers need:
-
-- `connect-src wss://proxy.ojin.ai` (or equivalent customer-specific origin).
-- `media-src blob:` for v2.0 audio playback via `URL.createObjectURL`.
-- `img-src blob:` for v2.0 video painting via `createImageBitmap` sourced from `Blob`.
-- `Permissions-Policy: microphone=(self)` for consumers capturing user audio.
-- `Permissions-Policy: autoplay=*` caveat for avatars that start speaking on load (most browsers block autoplay without user gesture; iOS needs `unlockAudio()` — cross-link to §7.4).
-- `Cross-Origin-Embedder-Policy` / `Cross-Origin-Opener-Policy` notes if v2.0 uses `SharedArrayBuffer` paths inside the Worker — currently not planned, but documented as a constraint if we add it.
-
-Five minutes of reading; saves every integrator 30 minutes the first time they ship behind a real CSP.
+Withdrawn. These recipes apply to browser deployments; Node-only v1.0 has no CSP / Permissions-Policy / COEP surface to document. Revisit alongside browser support.
 
 ---
 
@@ -887,49 +910,43 @@ Anticipated objections from the external reviewer, pre-answered.
 
 ### 15.1 v1.0 GA
 
-- [ ] All P0 defects (§1.2 D1–D3) closed with tests.
+- [ ] All P0 defects (§1.2 D2, D3; D1 superseded) closed with tests.
 - [ ] All P1 items shipped.
 - [ ] Coverage ≥ 80% overall, ≥ 85% branches, 100% on connect/reconnect/handleClose/auth paths.
-- [ ] Browser smoke test passes (happy-dom + mock `WebSocket`).
-- [ ] **Playwright smoke test green on Chromium, Firefox, and WebKit** (connect → `SessionReady` → `sendText` → one `InteractionResponse` → clean disconnect) against the mock WS server. Gates the v1.0 tag. Addresses R13 / FE-review finding 4.
-- [ ] **BFCache negative-path test on Playwright/WebKit:** navigate away, return via browser back button; SDK closes on `pagehide.persisted === true` and reconnects on `pageshow.persisted === true`. Addresses R11 / FE-review finding 2.
-- [ ] **Background-tab simulation test** passes: fake-timer + `Date.now()` 90 s jump + synthetic `visibilitychange` → reconnect fires synchronously on foregrounding (FE-review finding 1 / R14).
-- [ ] Dual ESM + CJS + UMD builds produced; UMD smoke-loaded in a headless-browser CI step (`globalThis.Ojin` constructs without throwing).
-- [ ] **Tree-shaking test passes:** dummy consumer importing only `OjinClient` produces a Rollup bundle containing no `FPSTracker` / `LatencyTracker` source text (FE-review finding 15).
-- [ ] **Baseline ESM gzip size recorded** in the first PR of the v1.0 work and checked-in; bundle-size budget (§6.6) is computed against it.
-- [ ] **Public-surface narrowing verified** (FE-review finding 26): `@ojinai/js-sdk` default entry exports ≤ 30 named symbols; protocol / profiling / internal subpaths in `package.json` `exports`.
+- [ ] Dual ESM + CJS builds produced and tested against Node 20 and 22.
+- [ ] **Node-only constraint enforced:** no `window` / `document` / `navigator` / `WebSocket` (global) references in `src/`; `package.json` has no `browser` field and no UMD/IIFE output; `resolve({ browser: true })` removed from `rollup.config.mjs`. (Grep-in-CI rule.)
+- [ ] **Public-surface narrowing verified:** `@ojinai/js-sdk` default entry exports the minimal surface; protocol / profiling / internal subpaths in `package.json` `exports`.
 - [ ] **No raw `console.*` or unowned `setInterval`/`setTimeout` in `src/`** (grep-in-CI rule, FE-review finding 25).
-- [ ] README quickstart runs end-to-end against a staging backend.
-- [ ] README has the CSP / Permissions-Policy recipe (§10.6, FE-review finding 27).
+- [ ] README quickstart runs end-to-end against a staging backend **from a Node process**; README prominently states the SDK is not for client-side use.
 - [ ] TypeDoc site publishes in CI.
 - [ ] 10-minute soak test at simulated stream rate runs without unbounded RSS growth (numeric target set in v1.5 after baseline measurement).
 - [ ] Wire-compat fixture tests pass against Python SDK-captured binary frames.
 - [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test:cov` all green in CI.
-- [ ] Bundle-size budget check (§6.6) passes — baseline pinned during v1.0 run.
-- [ ] CHANGELOG entry listing every fix with D-number reference and migration-guide pointers for the renamed options (§11.1).
+- [ ] CHANGELOG entry listing every fix with D-number reference, migration-guide pointers for the renamed options (§11.1), **and a prominent "v0.1 → v1.0: browser path removed" entry** with rationale.
 - [ ] SECURITY.md and CONTRIBUTING.md in place.
+
+~~_Removed 2026-04-21 (browser-specific):_~~
+- ~~Browser smoke test (happy-dom + mock `WebSocket`).~~
+- ~~Playwright smoke test on Chromium / Firefox / WebKit.~~
+- ~~BFCache negative-path test on Playwright/WebKit.~~
+- ~~Background-tab simulation test.~~
+- ~~UMD build produced and loaded in a headless-browser CI step.~~
+- ~~Tree-shaking test excluding profiling from the default entry.~~
+- ~~Baseline ESM gzip size + bundle-size budget (§6.6).~~
+- ~~README CSP / Permissions-Policy recipe (§10.6).~~
 
 ### 15.2 v1.5
 
-- [ ] `createClient(sessionToken)` works against live backend.
+- [ ] `createClient(sessionToken)` works against live backend (Node-side).
 - [ ] Token expiry + refresh hook.
 - [ ] Example token-exchange server (Express + Next.js).
-- [ ] Example projects shipped: `examples/node-cli`, `examples/browser-vanilla`, `examples/react-next` — each with a runnable quickstart.
+- [ ] Example project shipped: `examples/node-cli` with a runnable quickstart.
 - [ ] Measurable performance targets committed (first-frame latency, reconnect recovery, soak-test RSS budget, serializer throughput) — numbers ratified from v1.0 baselines.
 - [ ] No regressions against v1.0 acceptance tests.
-- [ ] Playwright e2e coverage for the browser path (supplementing happy-dom; addresses R13).
 
-### 15.3 v2.0
+### 15.3 ~~v2.0~~ — **Placeholder (scope TBD)**
 
-- [ ] Monorepo with `@ojinai/js-sdk`, `@ojinai/react`, `@ojinai/examples`.
-- [ ] Changesets-based publishing.
-- [ ] DOM helpers (`streamToVideoElement`, `streamToCanvas`) shipped — Q1 resolved to JPEG (§7.4). Meet the measurable criteria below.
-- [ ] **Render budget:** ≤ 8 ms main-thread cost per frame on a 2021 mid-tier Android (Pixel 6a baseline). FE-review finding 6.
-- [ ] **Lip-sync:** median audio-video offset ≤ 20 ms over a 60 s session, p95 ≤ 40 ms. Measured via `onRenderStats`. FE-review finding 3.
-- [ ] **Memory soak:** 60-minute run at 25 fps with consumer *not* retaining frames — Chromium `performance.memory.usedJSHeapSize` growth < 5 MB; RSS growth < 20 MB. FE-review finding 9.
-- [ ] **`ImageBitmap` retention test:** 10 000 frames sent, consumer calls `retainFrame()` on zero of them → no GPU leak detectable via Chrome DevTools memory panel.
-- [ ] Telemetry, if authored: off by default, privacy / security review signed off before merge.
-- [ ] Operational maturity sections authored: observability dashboard + alerts, rollback procedure, release DRI, security review gate, accessibility posture.
+Under the 2026-04-21 scope change, v2.0 is re-planned only once the Ojin backend ships a media-transport ingress (WebRTC / LiveKit / Daily). The prior criteria (monorepo + React hooks + browser DOM helpers + lip-sync + render budget) assumed a browser SDK that no longer exists on the roadmap; they are not committed until that transport surface arrives.
 
 ---
 

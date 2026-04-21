@@ -1,6 +1,6 @@
 # Ojin Client — TypeScript SDK
 
-WebSocket client SDK for the Ojin Speech-To-Video service.
+Node.js client SDK for the Ojin Speech-To-Video service. **Server-side only** — this SDK must run in a Node process (typically your own backend), not in a browser or mobile app.
 
 ## Install
 
@@ -10,23 +10,44 @@ npm install ojin-client
 pnpm add ojin-client
 ```
 
-## Quick Start
+Requires Node.js 20+.
+
+## Not for client-side use
+
+**Do not load this SDK in a browser or any untrusted runtime.** The Ojin WebSocket takes an API key on the upgrade request; exposing that key in client code (or in a URL visible to the client) would leak the credential. Browser support is intentionally withdrawn until the Ojin backend ships a real media-transport ingress (WebRTC / LiveKit / Daily).
+
+The expected integration pattern is:
+
+```
+Your frontend  ⇄  Your backend (uses @ojinai/js-sdk)  ⇄  Ojin
+```
+
+Your backend opens the Ojin connection, owns the API key, and exposes your own client-facing transport (WebSocket, SSE, HTTP, whatever fits) to your frontend.
+
+## Quick Start (Node)
 
 ```ts
-import { OjinClient, OjinEvent, OjinTextInputMessage, OjinCancelInteractionMessage } from "ojin-client";
+import {
+  OjinClient,
+  OjinEvent,
+  OjinTextInputMessage,
+  OjinAudioInputMessage,
+  OjinCancelInteractionMessage,
+  OjinEndInteractionMessage,
+} from "ojin-client";
 
 const client = new OjinClient({
   wsUrl: "wss://api.ojin.ai/ws",
-  apiKey: "your-api-key",
+  apiKey: process.env.OJIN_API_KEY!,
   configId: "your-config-id",
 });
 
-// Listen for events
 client.events.on(OjinEvent.SessionReady, (msg) => {
-  console.log("Session ready!", msg.parameters);
+  console.log("Session ready:", msg.parameters);
 });
 
 client.events.on(OjinEvent.InteractionResponse, (msg) => {
+  // Forward frames to your own client transport.
   console.log("Video frame:", msg.videoFrameBytes.length, "bytes");
   console.log("Audio frame:", msg.audioFrameBytes.length, "bytes");
   console.log("Frame type:", msg.frameType); // 0 = idle, 1 = speech
@@ -36,44 +57,18 @@ client.events.on(OjinEvent.ConnectionClosed, (code, reason) => {
   console.log("Disconnected:", code, reason);
 });
 
-// Connect and interact
 await client.connect();
 
-// Send text input
 await client.sendMessage(new OjinTextInputMessage("Hello!"));
 
-// Send audio input
-const audioData = new Uint8Array([...]); // PCM int16 audio bytes
+const audioData = new Uint8Array([/* PCM int16 audio bytes */]);
 await client.sendMessage(new OjinAudioInputMessage(audioData));
 
-// Cancel current interaction
 await client.sendMessage(new OjinCancelInteractionMessage());
-
-// End interaction
 await client.sendMessage(new OjinEndInteractionMessage());
 
-// Disconnect
 await client.close();
 ```
-
-## Polling-Style API
-
-For compatibility with the Python SDK pattern, you can also use `receiveMessage()`:
-
-```ts
-await client.connect();
-
-const sessionReady = await client.receiveMessage(); // OjinSessionReadyMessage
-await client.sendMessage(new OjinTextInputMessage("Hi"));
-
-const response = await client.receiveMessage(); // OjinInteractionResponseMessage
-```
-
-## Browser Support
-
-The SDK works in both Node.js and browser environments. In Node.js it uses the `ws` package; in browsers it uses the native `WebSocket` API.
-
-**Note:** Browser WebSocket does not support custom headers. Authentication must be passed via URL query parameters (which the SDK handles automatically via `config_id`).
 
 ## API Reference
 
@@ -83,9 +78,7 @@ The SDK works in both Node.js and browser environments. In Node.js it uses the `
 |--------|-------------|
 | `connect()` | Establish WebSocket connection |
 | `close()` | Close the connection |
-| `startInteraction()` | Drain pending response messages |
 | `sendMessage(msg)` | Send an OjinMessage |
-| `receiveMessage()` | Receive next message (polling) |
 | `isConnected()` | Check connection state |
 
 ### Events
