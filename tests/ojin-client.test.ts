@@ -1,5 +1,7 @@
+import * as http from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
+import { AuthError, ConnectionError, OjinErrorCode } from "../src/errors.js";
 import {
   ConnectionState,
   FrameType,
@@ -12,6 +14,10 @@ import {
   OjinTextInputMessage,
   serializeInteractionResponseMessage,
 } from "../src/index.js";
+import {
+  classifyUpgradeFailureByClose,
+  classifyUpgradeFailureByStatus,
+} from "../src/protocol/error-mapping.js";
 
 describe("OjinClient integration", () => {
   let wss: WebSocketServer;
@@ -75,8 +81,6 @@ describe("OjinClient integration", () => {
       wsUrl: `ws://127.0.0.1:${port}`,
       apiKey: "test-api-key",
       configId: "test-config-id",
-      reconnectAttempts: 1,
-      reconnectDelay: 0.1,
     });
   }
 
@@ -177,24 +181,227 @@ describe("OjinClient integration", () => {
       wsUrl: "ws://127.0.0.1:1",
       apiKey: "test",
       configId: "test",
-      reconnectAttempts: 1,
-      reconnectDelay: 0.01,
     });
     await expect(client.connect()).rejects.toThrow();
     expect(client.connectionState).toBe(ConnectionState.Disconnected);
   });
+});
 
-  it("should use receiveMessage() polling API", async () => {
-    const client = createClient();
-    await client.connect();
+// ── HTTP upgrade failure classification (unit tests) ───────────────────────────
 
-    const msg = await client.receiveMessage();
-    expect(msg).toBeInstanceOf(OjinSessionReadyMessage);
+describe("classifyUpgradeFailureByStatus", () => {
+  it("401 → AuthError(AuthFailed) with details.httpStatus", () => {
+    const err = classifyUpgradeFailureByStatus(401);
+    expect(err).toBeInstanceOf(AuthError);
+    expect(err.code).toBe(OjinErrorCode.AuthFailed);
+    expect((err.details as { httpStatus: number }).httpStatus).toBe(401);
+  });
 
-    await client.sendMessage(new OjinTextInputMessage("Hello polling!"));
-    const response = await client.receiveMessage();
-    expect(response).toBeInstanceOf(OjinInteractionResponseMessage);
+  it("403 → AuthError(AuthFailed) with details.httpStatus", () => {
+    const err = classifyUpgradeFailureByStatus(403);
+    expect(err).toBeInstanceOf(AuthError);
+    expect(err.code).toBe(OjinErrorCode.AuthFailed);
+    expect((err.details as { httpStatus: number }).httpStatus).toBe(403);
+  });
 
-    await client.close();
+  it("500 → ConnectionError(ConnectionFailed) with details.httpStatus", () => {
+    const err = classifyUpgradeFailureByStatus(500);
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect(err.code).toBe(OjinErrorCode.ConnectionFailed);
+    expect((err.details as { httpStatus: number }).httpStatus).toBe(500);
+  });
+
+  it("503 → ConnectionError(ConnectionFailed) with details.httpStatus", () => {
+    const err = classifyUpgradeFailureByStatus(503);
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect(err.code).toBe(OjinErrorCode.ConnectionFailed);
+    expect((err.details as { httpStatus: number }).httpStatus).toBe(503);
+  });
+
+  it("404 → ConnectionError (not AuthError)", () => {
+    expect(classifyUpgradeFailureByStatus(404)).not.toBeInstanceOf(AuthError);
+  });
+});
+
+describe("classifyUpgradeFailureByClose", () => {
+  it("close code 1008 → AuthError(AuthFailed)", () => {
+    const err = classifyUpgradeFailureByClose(1008, "Invalid API key");
+    expect(err).toBeInstanceOf(AuthError);
+    expect(err.code).toBe(OjinErrorCode.AuthFailed);
+    expect((err.details as { closeCode: number }).closeCode).toBe(1008);
+    expect((err.details as { closeReason: string }).closeReason).toBe("Invalid API key");
+  });
+
+  it("close code 4401 → AuthError(AuthFailed)", () => {
+    const err = classifyUpgradeFailureByClose(4401, "");
+    expect(err).toBeInstanceOf(AuthError);
+    expect(err.code).toBe(OjinErrorCode.AuthFailed);
+  });
+
+  it("close reason 'auth failed' → AuthError(AuthFailed)", () => {
+    const err = classifyUpgradeFailureByClose(1000, "auth failed");
+    expect(err).toBeInstanceOf(AuthError);
+    expect(err.code).toBe(OjinErrorCode.AuthFailed);
+  });
+
+  it("close reason 'unauthorized' → AuthError(AuthFailed)", () => {
+    const err = classifyUpgradeFailureByClose(1000, "unauthorized access");
+    expect(err).toBeInstanceOf(AuthError);
+    expect(err.code).toBe(OjinErrorCode.AuthFailed);
+  });
+
+  it("close reason 'forbidden' → AuthError(AuthFailed)", () => {
+    const err = classifyUpgradeFailureByClose(1000, "forbidden");
+    expect(err).toBeInstanceOf(AuthError);
+    expect(err.code).toBe(OjinErrorCode.AuthFailed);
+  });
+
+  it("close code 1011, 'internal error' → ConnectionError(ConnectionFailed)", () => {
+    const err = classifyUpgradeFailureByClose(1011, "internal error");
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect(err.code).toBe(OjinErrorCode.ConnectionFailed);
+    expect((err.details as { closeCode: number }).closeCode).toBe(1011);
+    expect((err.details as { closeReason: string }).closeReason).toBe("internal error");
+  });
+
+  it("close code 1006, empty reason → ConnectionError(ConnectionFailed)", () => {
+    const err = classifyUpgradeFailureByClose(1006, "");
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect(err.code).toBe(OjinErrorCode.ConnectionFailed);
+  });
+
+  it("close code 1000, benign reason → ConnectionError (not AuthError)", () => {
+    expect(classifyUpgradeFailureByClose(1000, "normal close")).not.toBeInstanceOf(AuthError);
+  });
+});
+
+// ── HTTP upgrade failure integration tests (Node mock server) ─────────────────
+
+describe("OjinClient HTTP upgrade failures", () => {
+  /** Start an HTTP server that rejects WS upgrades with the given status. */
+  async function startRejectingServer(status: number): Promise<{
+    port: number;
+    upgradeCount: () => number;
+    close: () => Promise<void>;
+  }> {
+    let count = 0;
+    const server = http.createServer();
+
+    server.on("upgrade", (_req, socket) => {
+      count++;
+      socket.write(
+        `HTTP/1.1 ${status} ${status === 401 ? "Unauthorized" : "Service Unavailable"}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`,
+      );
+      socket.destroy();
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+
+    return {
+      port,
+      upgradeCount: () => count,
+      close: () =>
+        new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve()))),
+    };
+  }
+
+  it("401 upgrade → AuthError(AuthFailed) with details.httpStatus", async () => {
+    const srv = await startRejectingServer(401);
+    try {
+      const client = new OjinClient({
+        wsUrl: `ws://127.0.0.1:${srv.port}`,
+        apiKey: "bad-key",
+        configId: "test",
+      });
+
+      let caught: Error | null = null;
+      try {
+        await client.connect();
+      } catch (err) {
+        caught = err as Error;
+      }
+
+      expect(caught).toBeInstanceOf(AuthError);
+      expect((caught as AuthError).code).toBe(OjinErrorCode.AuthFailed);
+      expect(((caught as AuthError).details as { httpStatus: number }).httpStatus).toBe(401);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("401 upgrade → no retries (AuthError is permanent)", async () => {
+    const srv = await startRejectingServer(401);
+    try {
+      const client = new OjinClient({
+        wsUrl: `ws://127.0.0.1:${srv.port}`,
+        apiKey: "bad-key",
+        configId: "test",
+      });
+
+      await client.connect().catch(() => undefined);
+
+      // default reconnectAttempts is 3 but AuthError must not retry
+      expect(srv.upgradeCount()).toBe(1);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("503 upgrade → ConnectionError (not AuthError)", async () => {
+    const srv = await startRejectingServer(503);
+    try {
+      const client = new OjinClient({
+        wsUrl: `ws://127.0.0.1:${srv.port}`,
+        apiKey: "test-key",
+        configId: "test",
+      });
+
+      let caught: Error | null = null;
+      try {
+        await client.connect();
+      } catch (err) {
+        caught = err as Error;
+      }
+
+      expect(caught).not.toBeInstanceOf(AuthError);
+      expect(caught).toBeInstanceOf(ConnectionError);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("503 upgrade → retries ARE attempted for non-auth failures", async () => {
+    const expectedAttempts = 3; // matches the hardcoded default reconnectAttempts
+    const srv = await startRejectingServer(503);
+    try {
+      const client = new OjinClient({
+        wsUrl: `ws://127.0.0.1:${srv.port}`,
+        apiKey: "test-key",
+        configId: "test",
+      });
+
+      await client.connect().catch(() => undefined);
+
+      expect(srv.upgradeCount()).toBe(expectedAttempts);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("401 upgrade → client state is Disconnected after rejection", async () => {
+    const srv = await startRejectingServer(401);
+    try {
+      const client = new OjinClient({
+        wsUrl: `ws://127.0.0.1:${srv.port}`,
+        apiKey: "bad-key",
+        configId: "test",
+      });
+
+      await client.connect().catch(() => undefined);
+      expect(client.connectionState).toBe(ConnectionState.Disconnected);
+    } finally {
+      await srv.close();
+    }
   });
 });

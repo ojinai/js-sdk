@@ -1,7 +1,20 @@
 // Version
 
 // Errors
-export { ConnectionError, OjinError, OjinErrorCode, ProtocolError } from "./errors.js";
+export {
+  AudioLockedError,
+  AuthError,
+  BackendUnavailableError,
+  ConfigurationError,
+  ConnectionError,
+  OjinError,
+  OjinErrorCode,
+  ProtocolError,
+  QueueFullError,
+  RateLimitError,
+  ReadyTimeoutError,
+  TimeoutError,
+} from "./errors.js";
 export type { OjinEventCallbacks } from "./events.js";
 // Events
 export { OjinEvent, OjinEventEmitter } from "./events.js";
@@ -58,6 +71,9 @@ export { MessageType } from "./protocol/session-messages.js";
 export type { OjinClientOptions } from "./types.js";
 // Types
 export { ConnectionState } from "./types.js";
+export type { LoggableMeta, OjinLogger } from "./utils/logger.js";
+// Logger
+export { createConsoleLogger, silent } from "./utils/logger.js";
 // Profiling
 export { FPSTracker, LatencyTracker } from "./utils/profiling.js";
 // UUID utilities

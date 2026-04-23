@@ -5,90 +5,36 @@
  * own backend and expose their own client-facing transport. The SDK must not
  * be loaded in a browser or any untrusted runtime; no browser WebSocket
  * implementation is shipped. See PLAN.md §2.2 and §4.1.
+ *
+ * This module re-exports {@link WSTransport} and delegates
+ * {@link createWSTransport} to the heartbeat-enabled {@link NodeWSTransport}
+ * in `ws-transport-node.ts`. The duplicate inline implementation that
+ * previously lived here has been removed to avoid divergence (ost-q6x3).
  */
 
-import WebSocket from "ws";
+import {
+  createNodeWSTransport,
+  type NodeWSTransportOptions,
+  type WSTransport,
+} from "./ws-transport-node.js";
 
-export interface WSTransport {
-  connect(url: string, headers: Record<string, string>): Promise<void>;
-  send(data: string | Uint8Array): void;
-  close(): void;
-  onMessage(handler: (data: Uint8Array, isBinary: boolean) => void): void;
-  onClose(handler: (code: number, reason: string) => void): void;
-  onError(handler: (err: Error) => void): void;
-  readonly isOpen: boolean;
-  setNoDelay(): void;
-}
+export type { WSTransport };
 
-class NodeWSTransport implements WSTransport {
-  private ws: WebSocket | null = null;
-  private messageHandler: ((data: Uint8Array, isBinary: boolean) => void) | null = null;
-  private closeHandler: ((code: number, reason: string) => void) | null = null;
-  private errorHandler: ((err: Error) => void) | null = null;
-
-  get isOpen(): boolean {
-    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
-  }
-
-  async connect(url: string, headers: Record<string, string>): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(url, { headers });
-
-      ws.on("open", () => resolve());
-      ws.on("error", (err: Error) => {
-        reject(err);
-        this.errorHandler?.(err);
-      });
-      ws.on("close", (code: number, reason: Buffer) => {
-        this.closeHandler?.(code, reason.toString("utf-8"));
-      });
-      ws.on("message", (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
-        if (this.messageHandler) {
-          const bytes =
-            data instanceof Buffer
-              ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-              : new Uint8Array(data as ArrayBuffer);
-          this.messageHandler(bytes, isBinary);
-        }
-      });
-
-      this.ws = ws;
-    });
-  }
-
-  send(data: string | Uint8Array): void {
-    if (!this.ws) throw new Error("WebSocket not connected");
-    this.ws.send(data);
-  }
-
-  close(): void {
-    this.ws?.close();
-  }
-
-  onMessage(handler: (data: Uint8Array, isBinary: boolean) => void): void {
-    this.messageHandler = handler;
-  }
-
-  onClose(handler: (code: number, reason: string) => void): void {
-    this.closeHandler = handler;
-  }
-
-  onError(handler: (err: Error) => void): void {
-    this.errorHandler = handler;
-  }
-
-  setNoDelay(): void {
-    if (!this.ws) return;
-    try {
-      const socket = (this.ws as unknown as { _socket?: { setNoDelay?: (v: boolean) => void } })
-        ._socket;
-      socket?.setNoDelay?.(true);
-    } catch {
-      // Ignore TCP_NODELAY failures; not critical.
-    }
-  }
-}
-
-export function createWSTransport(): WSTransport {
-  return new NodeWSTransport();
+/**
+ * Create the default Node.js WebSocket transport backed by the `ws` package.
+ *
+ * Delegates to {@link createNodeWSTransport} which includes the
+ * client-originated heartbeat ping logic (ost-q6x3 / PLAN.md §5.2). The
+ * interval is `.unref()`'d so it never holds the Node event loop open past
+ * `close()`.
+ *
+ * Intended for use by {@link OjinClient}. Pass the returned instance as
+ * `options.transport` when constructing a client, or rely on the default
+ * created automatically by {@link OjinClient}.
+ *
+ * @param options - Optional heartbeat interval (default: `30_000` ms) and
+ *   logger forwarded to {@link NodeWSTransport}.
+ */
+export function createWSTransport(options?: NodeWSTransportOptions): WSTransport {
+  return createNodeWSTransport(options);
 }

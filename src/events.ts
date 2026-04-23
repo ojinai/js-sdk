@@ -1,9 +1,10 @@
+import type { OjinError } from "./errors.js";
 import type {
-  OjinErrorResponseMessage,
   OjinInteractionResponseMessage,
   OjinSessionReadyMessage,
 } from "./protocol/client-messages.js";
 import type { ConnectionState } from "./types.js";
+import { type OjinLogger, silent } from "./utils/logger.js";
 
 /** Enum of all events emitted by OjinClient. */
 export enum OjinEvent {
@@ -19,6 +20,24 @@ export enum OjinEvent {
   InteractionResponse = "interactionResponse",
   /** Fired when an error is received from the server. */
   Error = "error",
+  /**
+   * Fired exactly once when the first concurrent caller enters
+   * `waitForReady()` while the inference server is not yet ready.
+   * Gives UIs a one-shot signal to render a loading indicator.
+   * Payload: `{ configId: string, elapsedMs: number }`.
+   */
+  WaitingForReady = "session.waiting_for_ready",
+  /**
+   * Fired when the outgoing pre-ready buffer overflows under `dropOldest` or
+   * `dropNewest` policy. Rate-limited to at most one emission per 5-second
+   * window. Payload: `{ dropped: N }` — total messages dropped since the
+   * last emission.
+   */
+  QueueOverflow = "queue.overflow",
+  /** Fired before an automatic reconnect attempt begins. */
+  Reconnecting = "connection.reconnecting",
+  /** Fired after the transport reconnects and before fresh session readiness. */
+  Reconnected = "connection.reconnected",
 }
 
 /** Typed event callback signatures for OjinClient events. */
@@ -28,12 +47,21 @@ export interface OjinEventCallbacks {
   [OjinEvent.ConnectionClosed]: (code: number, reason: string) => void;
   [OjinEvent.SessionReady]: (message: OjinSessionReadyMessage) => void;
   [OjinEvent.InteractionResponse]: (message: OjinInteractionResponseMessage) => void;
-  [OjinEvent.Error]: (message: OjinErrorResponseMessage) => void;
+  [OjinEvent.Error]: (error: OjinError) => void;
+  [OjinEvent.WaitingForReady]: (payload: { configId: string; elapsedMs: number }) => void;
+  [OjinEvent.QueueOverflow]: (payload: { dropped: number }) => void;
+  [OjinEvent.Reconnecting]: (payload: { attempt: number; delayMs: number }) => void;
+  [OjinEvent.Reconnected]: () => void;
 }
 
 /** Type-safe event emitter for OjinClient events. */
 export class OjinEventEmitter {
   private listeners: { [K in OjinEvent]?: Set<(...args: unknown[]) => void> } = {};
+  private readonly logger: OjinLogger;
+
+  constructor(logger: OjinLogger = silent) {
+    this.logger = logger;
+  }
 
   on<K extends OjinEvent>(event: K, callback: OjinEventCallbacks[K]): void {
     if (!this.listeners[event]) {
@@ -54,8 +82,10 @@ export class OjinEventEmitter {
       try {
         (callback as (...args: unknown[]) => void)(...args);
       } catch (err) {
-        // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- `event` is typed as OjinEvent (enum), not user input; ost-a8h9 removes this raw console.* entirely in favour of the injected logger (PLAN.md §5.3 / D8, D17).
-        console.error(`Error in ${event} event handler:`, err);
+        this.logger.error(`Error in ${event} event handler`, {
+          event,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     });
   }
