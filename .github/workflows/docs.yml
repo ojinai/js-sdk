@@ -1,0 +1,157 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Default permissions — build job only needs read; deploy job overrides to write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check API docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── AC-2 / AC-3: fail the build if TypeDoc emits any warning ────────────
+      # treatWarningsAsErrors is set in typedoc.json so this step is the gate.
+      # The --json output is consumed by the JSDoc-coverage step below.
+      - name: Build docs (treatWarningsAsErrors)
+        run: pnpm docs
+
+      - name: Verify docs/api/index.html was produced
+        run: |
+          if [ ! -f docs/api/index.html ]; then
+            echo "::error::docs/api/index.html was not generated"
+            exit 1
+          fi
+          echo "docs/api generated successfully:"
+          ls docs/api/
+
+      # ── AC-5: assert every exported symbol in all entry points has JSDoc ────
+      # Parse the TypeDoc JSON output (generated above) and scan for symbols
+      # whose effective summary (declaration or call-signature) is absent/empty.
+      - name: Check JSDoc coverage on all entry points
+        run: |
+          node --input-type=module <<'JSDOC_EOF'
+          import { readFileSync } from 'node:fs';
+
+          const doc = JSON.parse(readFileSync('docs/api/typedoc.json', 'utf8'));
+
+          // TypeDoc reflection kinds that require a JSDoc summary.
+          // 8=Enum, 32=Variable, 64=Function, 128=Class, 256=Interface,
+          // 2097152=TypeAlias
+          const REQUIRES_JSDOC = new Set([8, 32, 64, 128, 256, 2097152]);
+
+          /** Return true if sym has a non-empty JSDoc summary. */
+          function hasComment(sym) {
+            // Direct comment on the declaration node.
+            if (
+              Array.isArray(sym.comment?.summary) &&
+              sym.comment.summary.some((s) => s.text?.trim().length > 0)
+            ) {
+              return true;
+            }
+            // For functions (kind=64) the comment is usually on the call
+            // signature rather than the declaration node.
+            if (Array.isArray(sym.signatures)) {
+              return sym.signatures.some(
+                (sig) =>
+                  Array.isArray(sig.comment?.summary) &&
+                  sig.comment.summary.some((s) => s.text?.trim().length > 0)
+              );
+            }
+            return false;
+          }
+
+          function scanModule(mod) {
+            const missing = [];
+            if (!Array.isArray(mod.children)) return missing;
+            for (const sym of mod.children) {
+              if (!REQUIRES_JSDOC.has(sym.kind)) continue;
+              if (!hasComment(sym)) missing.push(`${mod.name}::${sym.name}`);
+            }
+            return missing;
+          }
+
+          const modules = doc.children ?? [];
+          if (modules.length === 0) {
+            console.error('::error::Cannot locate any modules in docs/api/typedoc.json');
+            process.exit(1);
+          }
+
+          // Scan all modules (covers the default entry and all subpath entries).
+          const undocumented = modules.flatMap(scanModule);
+
+          if (undocumented.length > 0) {
+            console.error(
+              '::error::The following exported symbols are missing a JSDoc summary:'
+            );
+            for (const name of undocumented) {
+              console.error('  - ' + name);
+            }
+            process.exit(1);
+          }
+
+          const totalChecked = modules.reduce(
+            (n, m) => n + (m.children?.length ?? 0), 0
+          );
+          console.log(
+            'JSDoc coverage OK — ' + totalChecked + ' exported symbol(s) checked across ' + modules.length + ' module(s).'
+          );
+          JSDOC_EOF
+
+      # Upload the built docs as an artifact for the deploy job (main only).
+      - name: Upload docs artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-api
+          path: docs/api
+          retention-days: 1
+
+  # ── AC-4: publish docs/api/ to the gh-pages branch on every push to main ──
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required by peaceiris/actions-gh-pages to push to gh-pages
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+
+    steps:
+      - name: Download docs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docs-api
+          path: docs/api
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/api
+          publish_branch: gh-pages
+          commit_message: "docs: publish API reference [skip ci]"

@@ -41,3 +41,138 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  bench:
+    name: Bench (regression check)
+    # Linux only — most stable host variance; macOS/Windows not used for gating.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run benchmarks (JSON output)
+        # --outputJson is the Vitest bench flag for structured output (distinct from
+        # --outputFile which targets the test JSON reporter, not the bench reporter).
+        run: pnpm exec vitest bench --outputJson bench-results.json
+
+      - name: Compare against baselines (<=30% regression allowed)
+        run: |
+          node --input-type=module <<'COMPARE_EOF'
+          import { readFileSync } from 'node:fs';
+
+          const results   = JSON.parse(readFileSync('bench-results.json',   'utf8'));
+          const baselines = JSON.parse(readFileSync('bench-baselines.json', 'utf8'));
+
+          // Vitest --outputJson produces: { files: [{ groups: [{ benchmarks: [{name, hz}] }] }] }
+          // We use a recursive extractor so any future restructuring is handled gracefully.
+          // Individual benchmark nodes carry both a string "name" and a numeric "hz"; group/file
+          // nodes do not have "hz", so they are silently skipped.
+          function extractBenchmarks(node) {
+            const found = {};
+            if (typeof node !== 'object' || node === null) return found;
+            if (typeof node.name === 'string' && typeof node.hz === 'number') {
+              found[node.name.trim()] = node.hz;
+            }
+            for (const val of Object.values(node)) {
+              if (Array.isArray(val)) {
+                for (const item of val) Object.assign(found, extractBenchmarks(item));
+              } else if (typeof val === 'object') {
+                Object.assign(found, extractBenchmarks(val));
+              }
+            }
+            return found;
+          }
+
+          const benchmarks = extractBenchmarks(results);
+          const THRESHOLD  = 0.70; // fail when current < 70% of baseline (>30% regression)
+          let failed = false;
+
+          for (const [name, baselineHz] of Object.entries(baselines)) {
+            if (name.startsWith('_')) continue; // skip metadata keys like _note
+
+            const currentHz = benchmarks[name];
+            if (currentHz === undefined) {
+              console.error('Missing: "' + name + '" not found in bench results');
+              failed = true;
+              continue;
+            }
+
+            const ratio = currentHz / baselineHz;
+            const ok    = ratio >= THRESHOLD;
+            const icon  = ok ? 'OK ' : 'FAIL';
+            const cur   = Math.round(currentHz).toLocaleString('en');
+            const base  = Math.round(baselineHz).toLocaleString('en');
+            console.log(icon + '  ' + name);
+            console.log('    current: ' + cur + ' ops/s  |  baseline: ' + base + ' ops/s  |  ratio: ' + ratio.toFixed(2));
+            if (!ok) {
+              const pct = ((1 - ratio) * 100).toFixed(1);
+              console.error('    REGRESSION: ' + pct + '% slower than baseline (threshold: 30%)');
+              failed = true;
+            }
+          }
+
+          if (failed) {
+            console.error('');
+            console.error('Bench regression detected.');
+            console.error('If the slowdown is intentional, re-run locally with "pnpm bench",');
+            console.error('update bench-baselines.json with the new numbers, and include a');
+            console.error('justification in your PR description.');
+            process.exit(1);
+          }
+          console.log('');
+          console.log('All benchmarks within the 30% regression threshold.');
+          COMPARE_EOF
+
+  grep-guardrails:
+    name: Grep guard-rails
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ripgrep
+        run: sudo apt-get install -y ripgrep
+
+      # ── AC-1: no raw console.* anywhere in src/ ──────────────────────────
+      # src/utils/logger.ts is the sole authorised console adapter; all other
+      # code must route output through the injected OjinLogger.
+      - name: No raw console.* in src/
+        run: |
+          if rg -n "console\." src/ --glob '!src/utils/logger.ts'; then
+            echo "::error::Raw console.* found outside src/utils/logger.ts — use the injected OjinLogger instead."
+            exit 1
+          fi
+
+      # ── AC-2/3: no unowned setTimeout/setInterval in src/ ─────────────────
+      # Allowlisted files are the four locations where timers are legitimately
+      # owned (abort-aware sleep, page-lifecycle watchdog, Node heartbeat):
+      #   src/utils/backoff.ts        — exponential-backoff delay (abortable)
+      #   src/utils/sleep.ts          — generic abortable sleep primitive
+      #   src/utils/page-lifecycle.ts — belt-and-braces BFCache watchdog
+      #   src/ws-transport-node.ts    — Node WebSocket heartbeat (uses .unref())
+      #
+      # To add a fifth owner, update the glob list here — the required CI-config
+      # change surfaces the new ownership in code review.
+      - name: No unowned setTimeout/setInterval in src/
+        run: |
+          if rg -n "(setTimeout|setInterval)\(" src/ \
+            --glob '!src/utils/backoff.ts' \
+            --glob '!src/utils/sleep.ts' \
+            --glob '!src/utils/page-lifecycle.ts' \
+            --glob '!src/ws-transport-node.ts'; then
+            echo "::error::Unowned setTimeout/setInterval found in src/. To allow it, add the owning file to the allowlist in .github/workflows/ci.yml so the new ownership is visible in code review."
+            exit 1
+          fi

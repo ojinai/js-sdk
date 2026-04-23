@@ -1,0 +1,11 @@
+{
+  "_note": "Conservative lower bounds for CI regression gating (Linux ubuntu-latest, Node 20). Values are set to ~1/10th of measured local-Mac performance to account for CI host variance. Update this file after measuring on CI and commit with a justification in the PR description whenever intentional changes slow a hot path.",
+  "serialize 1 KB text": 100000,
+  "serialize 100 KB audio": 5000,
+  "serialize 500 KB audio": 1000,
+  "emit 0 listeners": 1000000,
+  "emit 1 listener": 1000000,
+  "emit 10 listeners": 500000,
+  "emit 100 listeners": 500000,
+  "emit catch hot path (1 throw + 99 ok)": 20000
+}

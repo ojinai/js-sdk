@@ -1,0 +1,24 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "ojin-client",
+  "entryPoints": [
+    "src/index.ts",
+    "src/protocol/index.ts",
+    "src/utils/profiling.ts",
+    "src/utils/uuid.ts"
+  ],
+  "entryPointStrategy": "resolve",
+  "out": "docs/api",
+  "json": "docs/api/typedoc.json",
+  "treatWarningsAsErrors": true,
+  "validation": {
+    "notExported": false
+  },
+  "sourceLinkTemplate": "https://github.com/journee-live/ojin/blob/{gitRevision}/{path}#L{line}",
+  "tsconfig": "tsconfig.json",
+  "includeVersion": true,
+  "readme": "README.md",
+  "excludePrivate": true,
+  "excludeExternals": true,
+  "cleanOutputDir": true
+}

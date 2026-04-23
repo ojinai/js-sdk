@@ -3,15 +3,33 @@
   "version": "0.1.0",
   "description": "Ojin Speech-To-Video WebSocket client SDK for TypeScript",
   "type": "module",
-  "main": "dist/cjs/index.cjs",
+  "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
-  "types": "dist/types/index.d.ts",
+  "types": "dist/esm/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/types/index.d.ts",
+      "types": "./dist/esm/index.d.ts",
       "import": "./dist/esm/index.js",
-      "require": "./dist/cjs/index.cjs",
+      "require": "./dist/cjs/index.js",
       "default": "./dist/esm/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/esm/protocol/index.d.ts",
+      "import": "./dist/esm/protocol/index.js",
+      "require": "./dist/cjs/protocol/index.js",
+      "default": "./dist/esm/protocol/index.js"
+    },
+    "./profiling": {
+      "types": "./dist/esm/utils/profiling.d.ts",
+      "import": "./dist/esm/utils/profiling.js",
+      "require": "./dist/cjs/utils/profiling.js",
+      "default": "./dist/esm/utils/profiling.js"
+    },
+    "./internal/uuid": {
+      "types": "./dist/esm/utils/uuid.d.ts",
+      "import": "./dist/esm/utils/uuid.js",
+      "require": "./dist/cjs/utils/uuid.js",
+      "default": "./dist/esm/utils/uuid.js"
     }
   },
   "files": [
@@ -21,6 +39,9 @@
     "build": "rollup -c",
     "dev": "rollup -c -w",
     "typecheck": "tsc --noEmit",
+    "docs": "typedoc --options typedoc.json --projectDocuments docs/concepts.md --projectDocuments docs/recipes/audio-from-node-stream.md --projectDocuments docs/recipes/forward-frames-to-client.md --projectDocuments docs/recipes/handle-interruption.md --projectDocuments docs/recipes/error-handling.md",
+    "docs:check-examples": "node docs/check-examples.mjs",
+    "bench": "vitest bench",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
@@ -62,8 +83,10 @@
     "@rollup/plugin-typescript": "^12.1.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.0",
+    "fast-check": "4.7.0",
     "rollup": "^4.0.0",
     "tslib": "^2.8.0",
+    "typedoc": "^0.28.19",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },

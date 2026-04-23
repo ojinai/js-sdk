@@ -91,19 +91,44 @@ interface LatencyMeasure {
 /** Tracker that collects latency measurements by ID. */
 // biome-ignore lint/complexity/noStaticOnlyClass: PLAN.md §6.1 / ost-z6c3 restructures profiling as a subpath — module-function conversion happens there.
 export class LatencyTracker {
-  private static measures: Map<string, LatencyMeasure[]> = new Map();
-  private static sampleCounts: Map<string, number> = new Map();
-  private static sampleTotals: Map<string, number> = new Map();
-  private static sampleMax: Map<string, number> = new Map();
-  private static sampleMin: Map<string, number> = new Map();
+  // Backing fields — undefined until first access so that importing this module
+  // has no top-level side effects (required for Rollup preserveModules tree-shaking).
+  private static _measures?: Map<string, LatencyMeasure[]>;
+  private static _sampleCounts?: Map<string, number>;
+  private static _sampleTotals?: Map<string, number>;
+  private static _sampleMax?: Map<string, number>;
+  private static _sampleMin?: Map<string, number>;
+
+  private static get measures(): Map<string, LatencyMeasure[]> {
+    if (LatencyTracker._measures === undefined) LatencyTracker._measures = new Map();
+    return LatencyTracker._measures;
+  }
+  private static get sampleCounts(): Map<string, number> {
+    if (LatencyTracker._sampleCounts === undefined) LatencyTracker._sampleCounts = new Map();
+    return LatencyTracker._sampleCounts;
+  }
+  private static get sampleTotals(): Map<string, number> {
+    if (LatencyTracker._sampleTotals === undefined) LatencyTracker._sampleTotals = new Map();
+    return LatencyTracker._sampleTotals;
+  }
+  private static get sampleMax(): Map<string, number> {
+    if (LatencyTracker._sampleMax === undefined) LatencyTracker._sampleMax = new Map();
+    return LatencyTracker._sampleMax;
+  }
+  private static get sampleMin(): Map<string, number> {
+    if (LatencyTracker._sampleMin === undefined) LatencyTracker._sampleMin = new Map();
+    return LatencyTracker._sampleMin;
+  }
 
   /** Clear accumulated latency state. */
   static reset(): void {
-    LatencyTracker.measures.clear();
-    LatencyTracker.sampleCounts.clear();
-    LatencyTracker.sampleTotals.clear();
-    LatencyTracker.sampleMax.clear();
-    LatencyTracker.sampleMin.clear();
+    // Null out backing fields rather than calling .clear() so that no Map is
+    // allocated when reset() is called before the tracker has ever been used.
+    LatencyTracker._measures = undefined;
+    LatencyTracker._sampleCounts = undefined;
+    LatencyTracker._sampleTotals = undefined;
+    LatencyTracker._sampleMax = undefined;
+    LatencyTracker._sampleMin = undefined;
   }
 
   private static recordSample(measureId: string, durationMs: number): void {
