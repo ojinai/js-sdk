@@ -28,19 +28,6 @@ function readUint32BE(buf: Uint8Array, offset: number): number {
   );
 }
 
-function writeUint32LE(buf: Uint8Array, offset: number, value: number): void {
-  buf[offset] = value & 0xff;
-  buf[offset + 1] = (value >>> 8) & 0xff;
-  buf[offset + 2] = (value >>> 16) & 0xff;
-  buf[offset + 3] = (value >>> 24) & 0xff;
-}
-
-function readUint32LE(buf: Uint8Array, offset: number): number {
-  return (
-    (buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24)) >>> 0
-  );
-}
-
 // ─── Payload type enum ───────────────────────────────────────────────────────
 
 /** Payload type constants for binary serialization. */
@@ -244,7 +231,7 @@ export function serializeInteractionResponseMessage(msg: InteractionResponseMess
 
   for (const entry of msg.payload.payloads) {
     const pt = payloadTypeFromStr(entry.payloadType);
-    writeUint32LE(result, offset, entry.data.length);
+    writeUint32BE(result, offset, entry.data.length);
     offset += 4;
     result[offset] = pt;
     offset += 1;
@@ -280,7 +267,7 @@ export function deserializeInteractionResponseMessage(
     if (data.length < offset + PAYLOAD_ENTRY_HEADER_SIZE) {
       throw new Error("Invalid data: truncated payload entry header");
     }
-    const dataSize = readUint32LE(data, offset);
+    const dataSize = readUint32BE(data, offset);
     const payloadTypeInt = data[offset + 4];
     offset += PAYLOAD_ENTRY_HEADER_SIZE;
 

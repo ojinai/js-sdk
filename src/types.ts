@@ -29,6 +29,23 @@ export interface ReconnectBackoff {
   jitter: number;
 }
 
+/** Options for `sendTextTurnAndWait()`. */
+export interface TextTurnWaitOptions {
+  /**
+   * Maximum time in milliseconds to wait for `session.ready` before the text
+   * turn is sent. Defaults to the client's configured `waitForReadyTimeoutMs`
+   * (or `10_000` if unset).
+   */
+  readyTimeoutMs?: number;
+  /**
+   * Maximum time in milliseconds to wait for the terminal speech response
+   * frame (`isFinalResponse: true`) after the text turn is sent.
+   *
+   * Defaults to `15_000`. Set to `Infinity` to disable the timeout.
+   */
+  responseTimeoutMs?: number;
+}
+
 /** Connection state of the OjinClient. */
 export enum ConnectionState {
   Disconnected = "disconnected",
@@ -36,6 +53,17 @@ export enum ConnectionState {
   Connected = "connected",
   Reconnecting = "reconnecting",
   Disconnecting = "disconnecting",
+}
+
+/** Semantic reason why a session ended. */
+export enum DisconnectReason {
+  ClientInitiated = "client_initiated",
+  ServerInitiated = "server_initiated",
+  ConnectionLost = "connection_lost",
+  AuthenticationFailed = "authentication_failed",
+  SessionTimeout = "session_timeout",
+  ReconnectFailed = "reconnect_failed",
+  Unknown = "unknown",
 }
 
 /** Configuration options for the OjinClient constructor. */
@@ -169,6 +197,16 @@ export interface OjinClientOptions {
    * helper in `src/utils/backoff.ts` for the delay formula.
    */
   reconnectBackoff?: ReconnectBackoff;
+  /**
+   * Maximum audio payload bytes to place in each outbound binary frame.
+   *
+   * Defaults to `500_000`, which leaves headroom below the server's
+   * `512_000` byte per-message ceiling for the 13-byte binary header and any
+   * serialized `params` JSON.
+   *
+   * Must be between `1_024` and `512_000` bytes, inclusive.
+   */
+  audioChunkSize?: number;
 }
 
 /**

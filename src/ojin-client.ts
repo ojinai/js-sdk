@@ -1,14 +1,17 @@
 import {
   AuthError,
+  ConfigurationError,
   ConnectionError,
   OjinError,
   OjinErrorCode,
   ProtocolError,
   QueueFullError,
   ReadyTimeoutError,
+  TimeoutError,
 } from "./errors.js";
 import { OjinEvent, OjinEventEmitter } from "./events.js";
 import {
+  FrameType,
   OjinAudioInputMessage,
   OjinCancelInteractionMessage,
   type OjinClientMessage,
@@ -26,17 +29,24 @@ import { MessageType } from "./protocol/session-messages.js";
 import {
   assertNoLegacyOptions,
   ConnectionState,
+  DisconnectReason,
   type OjinClientOptions,
   type ReconnectBackoff,
+  type TextTurnWaitOptions,
 } from "./types.js";
 import { computeBackoff, DEFAULT_RECONNECT_BACKOFF } from "./utils/backoff.js";
 import { createConsoleLogger, type OjinLogger } from "./utils/logger.js";
 import { redactMeta } from "./utils/redact.js";
+import { abortableSleep, scheduleTimeout, type TimeoutHandle } from "./utils/sleep.js";
 import { buildConnectionUrl } from "./utils/url.js";
 import { createWSTransport, type WSTransport } from "./ws-transport.js";
 
-/** Maximum chunk size for audio data in bytes (500KB). */
-const MAX_AUDIO_CHUNK_SIZE = 1024 * 500;
+/** Default audio payload bytes per outbound binary frame. */
+const DEFAULT_AUDIO_CHUNK_SIZE = 500_000;
+/** Smallest allowed audio payload bytes per frame. */
+const MIN_AUDIO_CHUNK_SIZE = 1_024;
+/** Largest allowed audio payload bytes per frame. */
+const MAX_AUDIO_CHUNK_SIZE = 512_000;
 const NO_RETRY_CLOSE_CODES = new Set<OjinErrorCode>([
   OjinErrorCode.AuthFailed,
   OjinErrorCode.Unauthorized,
@@ -76,6 +86,7 @@ export class OjinClient {
   private readonly maxReconnectAttempts: number;
   private readonly autoReconnect: boolean;
   private readonly reconnectBackoff: Required<ReconnectBackoff>;
+  private readonly audioChunkSize: number;
   private readonly logger: OjinLogger;
 
   /** When `true`, pre-ready `sendMessage` calls are buffered instead of thrown. */
@@ -129,7 +140,7 @@ export class OjinClient {
     isRetry: boolean;
   }> = [];
   /** Handle for the next scheduled throttle-queue flush; `null` when idle. */
-  private _throttleFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private _throttleFlushTimer: TimeoutHandle | null = null;
 
   /**
    * The most recently dispatched outgoing message, kept as the candidate for
@@ -147,12 +158,16 @@ export class OjinClient {
   private _rateLimitAttempts: number = 0;
   /** True while the 200 ms abortable retry sleep is in flight. */
   private _rateLimitSleeping: boolean = false;
+  /** True while a high-level text-turn helper owns the shared response waiter. */
+  private _textTurnWaitInFlight = false;
 
   private transport: WSTransport | null = null;
   private _connectionState: ConnectionState = ConnectionState.Disconnected;
   private _inferenceServerReady = false;
   private _lastSessionReady: OjinSessionReadyMessage | null = null;
   private _lastCloseErrorCode: OjinErrorCode | null = null;
+  private _lastTransportCloseCode = 1000;
+  private _lastTransportCloseReason = "";
   private _consecutiveReconnectFailures = 0;
   private _reconnectLoop: Promise<void> | null = null;
   private _awaitingReconnectReady = false;
@@ -193,6 +208,16 @@ export class OjinClient {
       ...DEFAULT_RECONNECT_BACKOFF,
       ...options.reconnectBackoff,
     };
+    this.audioChunkSize = options.audioChunkSize ?? DEFAULT_AUDIO_CHUNK_SIZE;
+    if (
+      !Number.isFinite(this.audioChunkSize) ||
+      this.audioChunkSize < MIN_AUDIO_CHUNK_SIZE ||
+      this.audioChunkSize > MAX_AUDIO_CHUNK_SIZE
+    ) {
+      throw new ConfigurationError(
+        `\`audioChunkSize\` must be between ${MIN_AUDIO_CHUNK_SIZE} and ${MAX_AUDIO_CHUNK_SIZE} bytes.`,
+      );
+    }
     this.logger = options.logger ?? createConsoleLogger("warn");
     this.events = new OjinEventEmitter(this.logger);
     this._autoWaitForReady = options.autoWaitForReady ?? false;
@@ -320,6 +345,11 @@ export class OjinClient {
     if (this._connectionState === ConnectionState.Disconnected) {
       return;
     }
+    const previousState = this._connectionState;
+    const shouldEmitClosed =
+      previousState === ConnectionState.Connected ||
+      previousState === ConnectionState.Connecting ||
+      previousState === ConnectionState.Reconnecting;
 
     // Abort BEFORE transport teardown so every in-flight sleep, backoff wait,
     // and waitForReady call receives a deterministic rejection rather than
@@ -342,6 +372,9 @@ export class OjinClient {
 
     this.transport?.close();
     this.transport = null;
+    if (shouldEmitClosed) {
+      this.emitConnectionClosed(1000, "", DisconnectReason.ClientInitiated);
+    }
 
     this.setConnectionState(ConnectionState.Disconnected);
   }
@@ -394,7 +427,7 @@ export class OjinClient {
     this._waitingForReadyCount++;
 
     return new Promise<OjinSessionReadyMessage>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout> | null = null;
+      let timer: TimeoutHandle | null = null;
 
       const cleanup = () => {
         this._waitingForReadyCount--;
@@ -422,7 +455,7 @@ export class OjinClient {
       };
 
       if (timeoutMs > 0 && timeoutMs !== Infinity) {
-        timer = setTimeout(() => {
+        timer = scheduleTimeout(() => {
           cleanup();
           const elapsedMs = Date.now() - startMs;
           reject(
@@ -458,6 +491,104 @@ export class OjinClient {
   }
 
   /**
+   * Send a complete text turn to the persona.
+   *
+   * Convenience wrapper that sends the text input message followed by
+   * `endInteraction()`. Use `sendText()` or `sendMessage(...)` directly when
+   * you need finer-grained control over turn boundaries.
+   *
+   * @param text - The text to send.
+   * @param params - Optional parameters forwarded to the interaction payload.
+   */
+  async sendTextTurn(text: string, params?: Record<string, unknown>): Promise<void> {
+    await this.sendText(text, params);
+    await this.endInteraction();
+  }
+
+  /**
+   * Send a complete text turn and resolve when its terminal speech frame
+   * arrives (`isFinalResponse: true`).
+   *
+   * This helper is intended for the common "send one text prompt and wait
+   * until the turn is finished" flow. Low-level streaming consumers should
+   * continue to use `sendTextTurn()` plus `OjinEvent.InteractionResponse`.
+   *
+   * The helper ignores idle frames and waits for the next speech interaction
+   * that begins after this call starts listening. Once the first speech frame
+   * arrives, subsequent frames are matched by `interactionId` until the final
+   * frame for that interaction is received.
+   */
+  async sendTextTurnAndWait(
+    text: string,
+    params?: Record<string, unknown>,
+    options?: TextTurnWaitOptions,
+  ): Promise<OjinInteractionResponseMessage> {
+    if (this._textTurnWaitInFlight) {
+      throw new ConfigurationError(
+        "High-level text turn helpers do not support concurrent calls on the same client.",
+      );
+    }
+
+    this._textTurnWaitInFlight = true;
+    try {
+      await this.waitForReady(options?.readyTimeoutMs ?? this._waitForReadyTimeoutMs);
+
+      const pending = this.waitForFinalSpeechResponse(options?.responseTimeoutMs ?? 15_000);
+      try {
+        await this.sendTextTurn(text, params);
+        return await pending.promise;
+      } finally {
+        pending.cleanup();
+      }
+    } finally {
+      this._textTurnWaitInFlight = false;
+    }
+  }
+
+  /**
+   * Send a complete text turn and yield each speech frame for that turn.
+   *
+   * This helper provides a per-turn async iterator on top of the global
+   * `interactionResponse` event stream. Idle frames are ignored. The iterator
+   * binds to the first speech `interactionId` that arrives after the turn is
+   * sent, yields frames for that interaction in arrival order, and completes
+   * after the terminal frame (`isFinalResponse: true`) is yielded.
+   */
+  async *streamTextTurn(
+    text: string,
+    params?: Record<string, unknown>,
+    options?: TextTurnWaitOptions,
+  ): AsyncGenerator<OjinInteractionResponseMessage, void, void> {
+    if (this._textTurnWaitInFlight) {
+      throw new ConfigurationError(
+        "High-level text turn helpers do not support concurrent calls on the same client.",
+      );
+    }
+
+    this._textTurnWaitInFlight = true;
+    try {
+      await this.waitForReady(options?.readyTimeoutMs ?? this._waitForReadyTimeoutMs);
+
+      const stream = this.createSpeechResponseStream(options?.responseTimeoutMs ?? 15_000);
+      try {
+        await this.sendTextTurn(text, params);
+        while (true) {
+          const next = await stream.iterator.next();
+          if (next.done) {
+            return;
+          }
+          yield next.value;
+        }
+      } finally {
+        await stream.iterator.return?.();
+        stream.cleanup();
+      }
+    } finally {
+      this._textTurnWaitInFlight = false;
+    }
+  }
+
+  /**
    * Send a raw PCM audio input message to the persona.
    *
    * Convenience wrapper around
@@ -467,7 +598,7 @@ export class OjinClient {
    * @param params - Optional parameters forwarded to the interaction payload.
    */
   async sendAudio(pcm: Uint8Array, params?: Record<string, unknown>): Promise<void> {
-    return this.sendMessage(new OjinAudioInputMessage(pcm as Uint8Array<ArrayBuffer>, params));
+    return this.sendMessage(new OjinAudioInputMessage(pcm, params));
   }
 
   /**
@@ -597,7 +728,7 @@ export class OjinClient {
 
     return new Promise<void>((resolve, reject) => {
       const { signal } = this.abortController;
-      let timer: ReturnType<typeof setTimeout> | null = null;
+      let timer: TimeoutHandle | null = null;
       // Forward-declared so cleanup() and onAbort() can reference each other.
       let onAbort!: () => void;
 
@@ -640,7 +771,7 @@ export class OjinClient {
 
       const timeoutMs = this._waitForReadyTimeoutMs;
       if (timeoutMs > 0 && timeoutMs !== Infinity) {
-        timer = setTimeout(() => {
+        timer = scheduleTimeout(() => {
           const idx = this._preReadyQueue.indexOf(entry);
           if (idx !== -1) this._preReadyQueue.splice(idx, 1);
           entry.reject(
@@ -684,6 +815,284 @@ export class OjinClient {
 
   isConnected(): boolean {
     return this.transport?.isOpen ?? false;
+  }
+
+  private waitForFinalSpeechResponse(responseTimeoutMs: number): {
+    cleanup: () => void;
+    promise: Promise<OjinInteractionResponseMessage>;
+  } {
+    const startMs = Date.now();
+    let timeout: TimeoutHandle | null = null;
+    let interactionId: string | null = null;
+    let settled = false;
+    let offResponse: (() => void) | null = null;
+    let offError: (() => void) | null = null;
+    let offClosed: (() => void) | null = null;
+
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== null) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+      offResponse?.();
+      offError?.();
+      offClosed?.();
+    };
+
+    const promise = new Promise<OjinInteractionResponseMessage>((resolve, reject) => {
+      offResponse = this.events.on(OjinEvent.InteractionResponse, (message) => {
+        if (message.frameType !== FrameType.Speech) {
+          return;
+        }
+        if (interactionId === null) {
+          interactionId = message.interactionId;
+        }
+        if (message.interactionId !== interactionId || !message.isFinalResponse) {
+          return;
+        }
+        cleanup();
+        resolve(message);
+      });
+
+      offError = this.events.on(OjinEvent.Error, (error) => {
+        cleanup();
+        reject(error);
+      });
+
+      offClosed = this.events.on(
+        OjinEvent.ConnectionClosed,
+        ({ code, reason, disconnectReason }) => {
+          cleanup();
+          reject(
+            new ConnectionError(
+              "Connection closed while waiting for the final interaction response",
+              OjinErrorCode.NotConnected,
+              {
+                code,
+                reason,
+                disconnectReason,
+                elapsedMs: Date.now() - startMs,
+                interactionId,
+              },
+            ),
+          );
+        },
+      );
+
+      if (responseTimeoutMs > 0 && responseTimeoutMs !== Infinity) {
+        timeout = scheduleTimeout(() => {
+          cleanup();
+          reject(
+            new TimeoutError(
+              OjinErrorCode.Timeout,
+              `Timed out waiting for the final interaction response after ${responseTimeoutMs}ms`,
+              {
+                responseTimeoutMs,
+                elapsedMs: Date.now() - startMs,
+                lastConnectionState: this._connectionState,
+                interactionId,
+              },
+            ),
+          );
+        }, responseTimeoutMs);
+      }
+    });
+
+    return { cleanup, promise };
+  }
+
+  private createSpeechResponseStream(responseTimeoutMs: number): {
+    cleanup: () => void;
+    iterator: AsyncGenerator<OjinInteractionResponseMessage, void, void>;
+  } {
+    const startMs = Date.now();
+    const queue: OjinInteractionResponseMessage[] = [];
+    let timeout: TimeoutHandle | null = null;
+    let interactionId: string | null = null;
+    let completed = false;
+    let failure: Error | null = null;
+    let resume: ((result: IteratorResult<OjinInteractionResponseMessage, void>) => void) | null =
+      null;
+    let resumeError: ((error: Error) => void) | null = null;
+    let offResponse: (() => void) | null = null;
+    let offError: (() => void) | null = null;
+    let offClosed: (() => void) | null = null;
+
+    const clearListeners = () => {
+      offResponse?.();
+      offError?.();
+      offClosed?.();
+      offResponse = null;
+      offError = null;
+      offClosed = null;
+    };
+
+    const clearTimeoutIfSet = () => {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+    };
+
+    const settlePendingIfPossible = () => {
+      if (resume === null) {
+        return;
+      }
+      if (failure !== null) {
+        const reject = resumeError;
+        resume = null;
+        resumeError = null;
+        reject?.(failure);
+        return;
+      }
+      if (queue.length > 0) {
+        const resolve = resume;
+        const next = queue.shift();
+        resume = null;
+        resumeError = null;
+        if (next) {
+          resolve({ value: next, done: false });
+        }
+        return;
+      }
+      if (completed) {
+        const resolve = resume;
+        resume = null;
+        resumeError = null;
+        resolve({ value: undefined, done: true });
+      }
+    };
+
+    const cleanup = () => {
+      completed = true;
+      clearTimeoutIfSet();
+      clearListeners();
+      settlePendingIfPossible();
+    };
+
+    const fail = (error: Error) => {
+      if (completed || failure !== null) {
+        return;
+      }
+      failure = error;
+      completed = true;
+      clearTimeoutIfSet();
+      clearListeners();
+      settlePendingIfPossible();
+    };
+
+    const finish = () => {
+      if (completed) {
+        return;
+      }
+      completed = true;
+      clearTimeoutIfSet();
+      clearListeners();
+      settlePendingIfPossible();
+    };
+
+    const scheduleResponseTimeout = () => {
+      clearTimeoutIfSet();
+      if (responseTimeoutMs <= 0 || responseTimeoutMs === Infinity) {
+        return;
+      }
+      timeout = scheduleTimeout(() => {
+        fail(
+          new TimeoutError(
+            OjinErrorCode.Timeout,
+            `Timed out waiting for the next interaction response after ${responseTimeoutMs}ms`,
+            {
+              responseTimeoutMs,
+              elapsedMs: Date.now() - startMs,
+              lastConnectionState: this._connectionState,
+              interactionId,
+            },
+          ),
+        );
+      }, responseTimeoutMs);
+    };
+
+    offResponse = this.events.on(OjinEvent.InteractionResponse, (message) => {
+      if (message.frameType !== FrameType.Speech) {
+        return;
+      }
+      if (interactionId === null) {
+        interactionId = message.interactionId;
+      }
+      if (message.interactionId !== interactionId) {
+        return;
+      }
+
+      queue.push(message);
+      if (message.isFinalResponse) {
+        finish();
+      } else {
+        scheduleResponseTimeout();
+      }
+      settlePendingIfPossible();
+    });
+
+    offError = this.events.on(OjinEvent.Error, (error) => {
+      fail(error);
+    });
+
+    offClosed = this.events.on(OjinEvent.ConnectionClosed, ({ code, reason, disconnectReason }) => {
+      fail(
+        new ConnectionError(
+          "Connection closed while streaming the interaction response",
+          OjinErrorCode.NotConnected,
+          {
+            code,
+            reason,
+            disconnectReason,
+            elapsedMs: Date.now() - startMs,
+            interactionId,
+          },
+        ),
+      );
+    });
+
+    scheduleResponseTimeout();
+
+    const iterator = (async function* (
+      nextFrame: () => Promise<IteratorResult<OjinInteractionResponseMessage, void>>,
+      stop: () => void,
+    ): AsyncGenerator<OjinInteractionResponseMessage, void, void> {
+      try {
+        while (true) {
+          const next = await nextFrame();
+          if (next.done) {
+            return;
+          }
+          yield next.value;
+        }
+      } finally {
+        stop();
+      }
+    })(() => {
+      if (failure !== null) {
+        return Promise.reject(failure);
+      }
+      if (queue.length > 0) {
+        const next = queue.shift();
+        if (next) {
+          return Promise.resolve({ value: next, done: false } as const);
+        }
+      }
+      if (completed) {
+        return Promise.resolve({ value: undefined, done: true } as const);
+      }
+      return new Promise<IteratorResult<OjinInteractionResponseMessage, void>>(
+        (resolve, reject) => {
+          resume = resolve;
+          resumeError = reject;
+        },
+      );
+    }, cleanup);
+
+    return { cleanup, iterator };
   }
 
   // ── Throttle helpers ────────────────────────────────────────────────────────
@@ -743,7 +1152,7 @@ export class OjinClient {
 
     // +1 ms so the boundary itself is safely past when the timer fires.
     const delay = Math.max(0, this._throttleTimestamps[0] + 1000 - Date.now() + 1);
-    this._throttleFlushTimer = setTimeout(() => {
+    this._throttleFlushTimer = scheduleTimeout(() => {
       this._throttleFlushTimer = null;
       this._flushThrottleQueue();
     }, delay);
@@ -937,6 +1346,38 @@ export class OjinClient {
     return Date.now() - this.lastInboundAtMs > this.inboundIdleTimeoutMs;
   }
 
+  private emitConnectionClosed(
+    code: number,
+    reason: string,
+    disconnectReason: DisconnectReason,
+  ): void {
+    this.events.emit(OjinEvent.ConnectionClosed, { code, reason, disconnectReason });
+  }
+
+  private emitLastCloseWithReason(disconnectReason: DisconnectReason): void {
+    this.emitConnectionClosed(
+      this._lastTransportCloseCode,
+      this._lastTransportCloseReason,
+      disconnectReason,
+    );
+  }
+
+  private classifyDisconnectReason(userInitiated: boolean): DisconnectReason {
+    if (userInitiated) {
+      return DisconnectReason.ClientInitiated;
+    }
+    if (this.hasNoRetryCloseCode()) {
+      return DisconnectReason.AuthenticationFailed;
+    }
+    if (this.isInboundStale()) {
+      return DisconnectReason.ConnectionLost;
+    }
+    if (this._lastCloseErrorCode !== null) {
+      return DisconnectReason.ServerInitiated;
+    }
+    return DisconnectReason.Unknown;
+  }
+
   private hasNoRetryCloseCode(): boolean {
     return this._lastCloseErrorCode !== null && NO_RETRY_CLOSE_CODES.has(this._lastCloseErrorCode);
   }
@@ -958,6 +1399,7 @@ export class OjinClient {
           `Failed to reconnect after ${this.maxReconnectAttempts} attempts`,
           OjinErrorCode.ReconnectFailed,
         );
+        this.emitLastCloseWithReason(DisconnectReason.ReconnectFailed);
         this.handleTerminalDisconnect(error);
         this.events.emit(OjinEvent.Error, error);
         return;
@@ -979,6 +1421,7 @@ export class OjinClient {
         await this.openTransport();
       } catch (err) {
         if (err instanceof AuthError) {
+          this.emitLastCloseWithReason(DisconnectReason.AuthenticationFailed);
           this.handleTerminalDisconnect(err);
           this.events.emit(OjinEvent.Error, err);
           return;
@@ -1103,6 +1546,9 @@ export class OjinClient {
     const shouldRetry =
       wasConnected && !userInitiated && this.autoReconnect && !this.hasNoRetryCloseCode();
     const hadReadySinceOpen = this._inferenceServerReady || this._lastSessionReady !== null;
+    const disconnectReason = this.classifyDisconnectReason(userInitiated);
+    this._lastTransportCloseCode = code;
+    this._lastTransportCloseReason = reason;
 
     this.transport = null;
     this._inferenceServerReady = false;
@@ -1112,10 +1558,6 @@ export class OjinClient {
       this._throttleFlushTimer = null;
     }
     this.resetRateLimitRetryState();
-
-    if (wasConnected) {
-      this.events.emit(OjinEvent.ConnectionClosed, code, reason);
-    }
 
     if (hadReadySinceOpen) {
       this._consecutiveReconnectFailures = 0;
@@ -1128,6 +1570,10 @@ export class OjinClient {
       this.setConnectionState(ConnectionState.Reconnecting);
       this.startReconnectLoop();
       return;
+    }
+
+    if (wasConnected) {
+      this.emitConnectionClosed(code, reason, disconnectReason);
     }
 
     this.handleTerminalDisconnect(
@@ -1169,22 +1615,11 @@ export class OjinClient {
    * the abort channel and would leave ghost timers alive after `close()`.
    */
   private sleep(ms: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const { signal } = this.abortController;
-      if (signal.aborted) {
-        reject(new OjinError("Operation aborted", OjinErrorCode.NotConnected));
-        return;
-      }
-      const timer = setTimeout(resolve, ms);
-      signal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          reject(new OjinError("Operation aborted", OjinErrorCode.NotConnected));
-        },
-        { once: true },
-      );
-    });
+    return abortableSleep(
+      ms,
+      this.abortController.signal,
+      () => new OjinError("Operation aborted", OjinErrorCode.NotConnected),
+    );
   }
 
   private chunkAndSendAudio(message: OjinAudioInputMessage): void {
@@ -1195,8 +1630,8 @@ export class OjinClient {
       return;
     }
 
-    for (let i = 0; i < audioBytes.length; i += MAX_AUDIO_CHUNK_SIZE) {
-      const end = Math.min(i + MAX_AUDIO_CHUNK_SIZE, audioBytes.length);
+    for (let i = 0; i < audioBytes.length; i += this.audioChunkSize) {
+      const end = Math.min(i + this.audioChunkSize, audioBytes.length);
       const chunk = audioBytes.subarray(i, end);
       const chunkMsg = new OjinAudioInputMessage(new Uint8Array(chunk), message.params);
       this.wsSend(chunkMsg.toBytes());
