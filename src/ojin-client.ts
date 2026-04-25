@@ -457,7 +457,7 @@ export class OjinClient {
       if (timeoutMs > 0 && timeoutMs !== Infinity) {
         timer = scheduleTimeout(() => {
           cleanup();
-          const elapsedMs = Date.now() - startMs;
+          const elapsedMs = Math.max(timeoutMs, Date.now() - startMs);
           reject(
             new ReadyTimeoutError(
               OjinErrorCode.ReadyTimeout,

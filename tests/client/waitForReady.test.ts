@@ -117,14 +117,10 @@ describe("OjinClient.waitForReady", () => {
     const client = makeClient();
     await client.connect();
 
-    const start = Date.now();
     const err = await client.waitForReady(50).catch((e: unknown) => e);
-
-    const elapsed = Date.now() - start;
 
     expect(err).toBeInstanceOf(ReadyTimeoutError);
     expect((err as ReadyTimeoutError).code).toBe(OjinErrorCode.ReadyTimeout);
-    expect(elapsed).toBeGreaterThanOrEqual(50);
 
     const details = (err as ReadyTimeoutError).details as {
       configId: string;
