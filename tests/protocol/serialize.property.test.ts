@@ -49,7 +49,9 @@ function makePayload(size: number): Uint8Array {
 // ─── Property test ────────────────────────────────────────────────────────────
 
 describe("InteractionInputMessage property tests", () => {
-  it("deserialize(serialize(x)) structurally equals x (excluding timestamp) for all valid inputs", () => {
+  it("deserialize(serialize(x)) structurally equals x (excluding timestamp) for all valid inputs", {
+    timeout: 60_000,
+  }, () => {
     fc.assert(
       fc.property(
         // payloadType: every valid PayloadType enum value

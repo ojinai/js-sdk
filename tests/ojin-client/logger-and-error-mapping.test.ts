@@ -286,7 +286,7 @@ describe("OjinEventEmitter – logger injection (unit)", () => {
     emitter.emit(OjinEvent.ConnectionOpened);
 
     expect(loggerErrorCalls.length).toBe(1);
-    expect(loggerErrorCalls[0]).toMatch(/connectionOpened/);
+    expect(loggerErrorCalls[0]).toMatch(/connection\.opened/);
     expect(consoleErrorSpy).not.toHaveBeenCalled();
 
     consoleErrorSpy.mockRestore();

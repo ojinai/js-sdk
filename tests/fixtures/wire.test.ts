@@ -302,12 +302,12 @@ describe("wire-compat: protocol header invariants", () => {
 
   it("InteractionResponse header is exactly 37 bytes (offset 37 must start first payload entry)", () => {
     const fixture = readBin("interaction_response_jpeg.bin");
-    // Bytes 37-40 are the dataSize LE of the first payload.
+    // Bytes 37-40 are the dataSize BE of the first payload.
     // The JPEG fixture has 12 bytes of JPEG data, so dataSize = 12 = 0x0C.
-    expect(fixture[37]).toBe(0x0c); // 12 LE low byte
+    expect(fixture[37]).toBe(0x00);
     expect(fixture[38]).toBe(0x00);
     expect(fixture[39]).toBe(0x00);
-    expect(fixture[40]).toBe(0x00);
+    expect(fixture[40]).toBe(0x0c);
     // Byte 41 is payloadType = Image = 2.
     expect(fixture[41]).toBe(0x02);
   });

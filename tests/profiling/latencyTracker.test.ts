@@ -148,13 +148,13 @@ describe("LatencyTracker — start / stop / stats", () => {
   });
 
   it("log() does not throw when no measures have been recorded", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     expect(() => LatencyTracker.log()).not.toThrow();
     expect(logSpy).not.toHaveBeenCalled();
   });
 
   it("log() emits one line per tracked measure", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
     LatencyTracker.startLatencyMeasure("a");
     LatencyTracker.stopLatencyMeasure("a");

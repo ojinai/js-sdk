@@ -193,7 +193,7 @@ Offset  Size  Endian  Field
 33      4     BE      numPayloads
 
 Repeated numPayloads times:
-  N      4     LE      dataSize   (LE — differs from header fields!)
+  N      4     BE      dataSize
   N+4    1     —       payloadType
   N+5    M     —       payload data  (M = dataSize)
 ```
