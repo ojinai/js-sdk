@@ -17,9 +17,7 @@ import {
   OjinEvent,
   FrameType,
   OjinInteractionResponseMessage,
-  OjinTextInputMessage,
-  OjinEndInteractionMessage,
-} from "ojin-client";
+} from "@ojinai/js-sdk";
 
 declare const myTransport: {
   send(payload: {
@@ -49,8 +47,7 @@ client.events.on(OjinEvent.InteractionResponse, (msg: OjinInteractionResponseMes
 });
 await client.connect();
 await client.waitForReady();
-await client.sendMessage(new OjinTextInputMessage("Hello!"));
-await client.sendMessage(new OjinEndInteractionMessage());
+await client.sendTextTurn("Hello!");
 ```
 
 ## Frame lifecycle

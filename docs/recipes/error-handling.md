@@ -40,7 +40,7 @@ import {
   BackendUnavailableError,
   OjinError,
   OjinErrorCode,
-} from "ojin-client";
+} from "@ojinai/js-sdk";
 
 const client = new OjinClient({
   wsUrl: process.env.OJIN_WS_URL!,

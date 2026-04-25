@@ -45,10 +45,8 @@ Requires Node.js ≥ 20.
 import {
   OjinClient,
   OjinEvent,
-  OjinTextInputMessage,
   OjinAudioInputMessage,
   OjinCancelInteractionMessage,
-  OjinEndInteractionMessage,
 } from "@ojinai/js-sdk";
 
 const client = new OjinClient({
@@ -62,18 +60,22 @@ client.events.on(OjinEvent.SessionReady, (msg) => {
   console.log("Session ready, params:", msg.parameters);
 });
 
-// Forward frames to your own client transport.
-client.events.on(OjinEvent.InteractionResponse, (msg) => {
-  myTransport.send({
-    video: msg.videoFrameBytes,
-    audio: msg.audioFrameBytes,
-    frameType: msg.frameType,  // FrameType.Idle = 0, FrameType.Speech = 1
+function forwardFrame(msg: { frameType: number; videoFrameBytes: Uint8Array; audioFrameBytes: Uint8Array }) {
+  console.log("Frame received:", {
+    frameType: msg.frameType,
+    videoBytes: msg.videoFrameBytes.byteLength,
+    audioBytes: msg.audioFrameBytes.byteLength,
   });
+}
+
+// Forward frames to your own downstream transport.
+client.events.on(OjinEvent.InteractionResponse, (msg) => {
+  forwardFrame(msg);
 });
 
 // Session closed (connection lost or server-initiated).
-client.events.on(OjinEvent.ConnectionClosed, (code, reason) => {
-  console.log("Session closed:", code, reason);
+client.events.on(OjinEvent.ConnectionClosed, ({ code, reason, disconnectReason }) => {
+  console.log("Session closed:", code, reason, disconnectReason);
 });
 
 // SDK or server errors surface here.
@@ -86,8 +88,12 @@ await client.connect();
 // Wait until the inference server signals ready before sending.
 await client.waitForReady();
 
-// Send a text turn.
-await client.sendMessage(new OjinTextInputMessage("Hello!"));
+// Send a text turn and resolve on the terminal speech frame.
+const finalResponse = await client.sendTextTurnAndWait("Hello!");
+console.log("Text turn complete:", {
+  interactionId: finalResponse.interactionId,
+  isFinal: finalResponse.isFinalResponse,
+});
 
 // Send PCM int16 audio bytes (auto-chunked at 500 KB).
 const pcm = new Uint8Array(/* PCM int16 audio bytes */);
@@ -95,9 +101,6 @@ await client.sendMessage(new OjinAudioInputMessage(pcm));
 
 // Cancel the in-flight interaction.
 await client.sendMessage(new OjinCancelInteractionMessage());
-
-// Signal end of turn.
-await client.sendMessage(new OjinEndInteractionMessage());
 
 await client.close();
 ```
@@ -142,6 +145,13 @@ new OjinClient(options: OjinClientOptions)
 | `connect(): Promise<void>` | Open the WebSocket connection |
 | `close(): Promise<void>` | Close the connection |
 | `waitForReady(timeoutMs?): Promise<OjinSessionReadyMessage>` | Resolves when the inference server is ready (default timeout: 10 s) |
+| `sendText(text, params?): Promise<void>` | Send only the text input frame |
+| `sendTextTurn(text, params?): Promise<void>` | Send text and then end the turn |
+| `sendTextTurnAndWait(text, params?, options?): Promise<OjinInteractionResponseMessage>` | Send text, end the turn, and resolve on the final speech frame |
+| `streamTextTurn(text, params?, options?): AsyncGenerator<OjinInteractionResponseMessage, void, void>` | Send text, end the turn, and stream speech frames for just that turn |
+| `sendAudio(pcm, params?): Promise<void>` | Send PCM int16 audio bytes |
+| `interrupt(): Promise<void>` | Cancel the in-flight interaction |
+| `endInteraction(): Promise<void>` | End the current interaction |
 | `sendMessage(msg: OjinClientMessage): Promise<void>` | Send a typed client message (`OjinTextInputMessage`, `OjinAudioInputMessage`, `OjinCancelInteractionMessage`, `OjinEndInteractionMessage`) |
 | `isConnected(): boolean` | Current connection check |
 
@@ -151,7 +161,7 @@ new OjinClient(options: OjinClientOptions)
 
 | Class | Use |
 | ----- | --- |
-| `OjinTextInputMessage(text, params?)` | Send a text turn |
+| `OjinTextInputMessage(text, params?)` | Send text input without ending the turn |
 | `OjinAudioInputMessage(pcm, params?)` | Send PCM int16 audio bytes (auto-chunked at 500 KB by `sendMessage`) |
 | `OjinCancelInteractionMessage()` | Cancel the in-flight interaction |
 | `OjinEndInteractionMessage()` | Signal end of turn |
@@ -165,7 +175,7 @@ typed payload shown below.
 | ----- | ------- | ------------- |
 | `connectionStateChanged` | `ConnectionState` | Any connection state transition |
 | `connectionOpened` | _(none)_ | WebSocket handshake complete |
-| `connectionClosed` | `(code: number, reason: string)` | Connection ended (client/server/error) |
+| `session.closed` | `{ code: number, reason: string, disconnectReason: DisconnectReason }` | Connection ended permanently |
 | `sessionReady` | `OjinSessionReadyMessage` | Inference server is ready for interactions |
 | `interactionResponse` | `OjinInteractionResponseMessage` | Video/audio frame received from server |
 | `error` | `OjinError` | SDK or server error (use `.code` for typed dispatch) |
@@ -178,7 +188,7 @@ import { OjinEvent } from "@ojinai/js-sdk";
 
 client.events.on(OjinEvent.ConnectionStateChanged, (state) => { ... });
 client.events.on(OjinEvent.ConnectionOpened, () => { ... });
-client.events.on(OjinEvent.ConnectionClosed, (code, reason) => { ... });
+client.events.on(OjinEvent.ConnectionClosed, ({ code, reason, disconnectReason }) => { ... });
 client.events.on(OjinEvent.SessionReady, (msg) => { ... });
 client.events.on(OjinEvent.InteractionResponse, (msg) => { ... });
 client.events.on(OjinEvent.Error, (err) => { ... });
@@ -228,6 +238,7 @@ pnpm test              # Run tests
 pnpm run lint          # Lint + format (auto-fix)
 pnpm run lint:check    # Lint + format (read-only; what CI runs)
 pnpm run typecheck     # Type-check only
+pnpm run integration:check  # Final release gate from PLAN.md §15.1
 pnpm run precommit     # Fast local gate (lint:check + typecheck + test)
 pnpm run prepush       # Full local gate (lint:check + typecheck + test + security)
 ```

@@ -57,6 +57,11 @@ one or more
 {@link index.OjinInteractionResponseMessage | OjinInteractionResponseMessage}
 frames; the last frame carries `isFinalResponse: true`.
 
+For text input, the high-level helpers are:
+- `client.sendTextTurn(...)` to send the turn and keep consuming frames via events
+- `client.sendTextTurnAndWait(...)` to send the turn and resolve on the final speech frame
+- `client.streamTextTurn(...)` to send the turn and consume only that turn's speech frames via `for await ... of`
+
 ```text
 sendMessage(OjinTextInputMessage | OjinAudioInputMessage)
     ↓  (repeat for additional audio chunks)

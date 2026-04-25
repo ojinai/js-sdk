@@ -15,9 +15,7 @@ your control-channel message maps to an Ojin cancellation.
 ```typescript
 import {
   OjinClient,
-  OjinTextInputMessage,
-  OjinEndInteractionMessage,
-} from "ojin-client";
+} from "@ojinai/js-sdk";
 
 // Replace with your own frontend-to-backend control channel.
 // "stop" is a custom message type your app defines.
@@ -45,8 +43,7 @@ controlChannel.on("stop", () => {
 });
 
 // Start an interaction so there is something to cancel.
-await client.sendMessage(new OjinTextInputMessage("Tell me a long story"));
-await client.sendMessage(new OjinEndInteractionMessage());
+await client.sendTextTurn("Tell me a long story");
 ```
 
 ## What happens after cancellation?
