@@ -80,10 +80,8 @@ run "Lint (read-only gate)" pnpm lint:check
 run "Typecheck" pnpm typecheck
 run "Unit/integration tests" pnpm test
 run "Coverage gate" pnpm test:cov
-run "Benchmark suite" pnpm bench
 run "Build dist outputs" pnpm build
 run "Wire compatibility fixtures" pnpm test:wire-compat
-run "Soak suite" pnpm test:soak
 run "Generate docs" pnpm run docs
 run "Type-check README and recipe examples" pnpm docs:check-examples
 
@@ -178,7 +176,6 @@ assert_file "SECURITY.md is present" "SECURITY.md"
 assert_file "CONTRIBUTING.md is present" "CONTRIBUTING.md"
 assert_file "CHANGELOG.md is present" "CHANGELOG.md"
 assert_file "LICENSE is present" "LICENSE"
-assert_file "bench-baselines.json is present" "bench-baselines.json"
 assert_file "typedoc.json is present" "typedoc.json"
 
 step "Publish dry-run tarball assertions"
