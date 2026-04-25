@@ -50,7 +50,7 @@
     "test:cov": "vitest run --coverage",
     "test:wire-compat": "vitest run tests/fixtures/wire.test.ts",
     "integration:check": "bash scripts/integration-check.sh",
-    "publish:dryrun": "pnpm publish --tag next --dry-run",
+    "publish:dryrun": "pnpm publish --tag next --dry-run --no-git-checks",
     "lint": "biome check --fix src/ tests/",
     "lint:check": "biome check src/ tests/",
     "format": "biome format --write src/ tests/",
