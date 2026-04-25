@@ -1,6 +1,6 @@
 {
-  "name": "ojin-client",
-  "version": "0.1.0",
+  "name": "@ojinai/js-sdk",
+  "version": "1.0.0-rc",
   "description": "Ojin Speech-To-Video WebSocket client SDK for TypeScript",
   "type": "module",
   "main": "dist/cjs/index.js",
@@ -33,19 +33,26 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md"
   ],
   "scripts": {
-    "build": "rollup -c",
+    "build": "rollup -c && node scripts/prune-dist.mjs",
     "dev": "rollup -c -w",
     "typecheck": "tsc --noEmit",
     "docs": "typedoc --options typedoc.json --projectDocuments docs/concepts.md --projectDocuments docs/recipes/audio-from-node-stream.md --projectDocuments docs/recipes/forward-frames-to-client.md --projectDocuments docs/recipes/handle-interruption.md --projectDocuments docs/recipes/error-handling.md",
     "docs:check-examples": "node docs/check-examples.mjs",
     "bench": "vitest bench",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:cov": "vitest run --coverage",
+    "test": "vitest run --exclude tests/soak/**/*.test.ts",
+    "test:watch": "vitest --exclude tests/soak/**/*.test.ts",
+    "test:cov": "vitest run --coverage --exclude tests/soak/**/*.test.ts",
+    "test:soak": "NODE_OPTIONS=--expose-gc vitest run tests/soak",
     "test:wire-compat": "vitest run tests/fixtures/wire.test.ts",
+    "integration:check": "bash scripts/integration-check.sh",
+    "publish:dryrun": "pnpm publish --tag next --dry-run",
     "lint": "biome check --fix src/ tests/",
     "lint:check": "biome check src/ tests/",
     "format": "biome format --write src/ tests/",
@@ -69,6 +76,9 @@
   "author": "Journee",
   "license": "Apache-2.0",
   "homepage": "https://github.com/journee-live/ojin",
+  "publishConfig": {
+    "tag": "next"
+  },
   "engines": {
     "node": ">=20"
   },
