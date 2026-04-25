@@ -84,7 +84,7 @@ run "Benchmark suite" pnpm bench
 run "Build dist outputs" pnpm build
 run "Wire compatibility fixtures" pnpm test:wire-compat
 run "Soak suite" pnpm test:soak
-run "Generate docs" pnpm docs
+run "Generate docs" pnpm run docs
 run "Type-check README and recipe examples" pnpm docs:check-examples
 
 assert_no_matches \
