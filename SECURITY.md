@@ -20,9 +20,10 @@ the backend. It must not be bundled into a browser-side application or exposed t
 ## Session Tokens
 
 Do not store Ojin session tokens in `localStorage` or any other long-lived browser storage.
-Keep tokens server-side where possible. If a browser-facing application needs a short-lived
-session credential, issue it from your backend and keep it in memory, or use a short-lived,
-`HttpOnly`, `Secure`, `SameSite` cookie scoped to the minimum path required.
+Keep tokens server-side. For browser-facing applications, prefer issuing short-lived
+session credentials from your backend through a short-lived, `HttpOnly`, `Secure`,
+`SameSite` cookie scoped to the minimum path required. Use in-memory browser storage only
+as a last-resort, well-justified exception, and keep TTLs minimal.
 
 ## Reporting a Vulnerability
 
