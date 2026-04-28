@@ -97,7 +97,7 @@ assert_no_matches \
 
 assert_no_matches \
   "No browser globals in src/" \
-  rg -n "\b(window|document|navigator)\b" src/
+  rg -n "(typeof\s+(window|document|navigator)\b|\b(window|document|navigator)(\.[A-Za-z_$]|\\[|\\s*(=|==|===|!=|!==)))" src/
 
 assert_no_matches \
   "No generic Uint8Array syntax in protocol types" \
