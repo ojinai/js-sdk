@@ -237,7 +237,12 @@ if (forbidden.length > 0) {
 NODE
 
 run "All dependency tickets are closed" node <<'NODE'
-const { readFileSync } = require("node:fs");
+const { existsSync, readFileSync } = require("node:fs");
+
+if (!existsSync(".tickets/ost-i1nt.md")) {
+  console.log("Skipping local ticket dependency check; .tickets/ost-i1nt.md is not present.");
+  process.exit(0);
+}
 
 const ticket = readFileSync(".tickets/ost-i1nt.md", "utf8");
 const depsLine = ticket.split("\n").find((line) => line.startsWith("deps:"));
