@@ -203,13 +203,38 @@ publish_output="$(pnpm run publish:dryrun 2>&1)" || {
 }
 printf '%s\n' "$publish_output"
 
-for required in "README.md" "CHANGELOG.md" "SECURITY.md" "LICENSE" "package.json" "dist/esm/index.js" "dist/cjs/index.js"; do
-  [[ "$publish_output" == *"$required"* ]] || fail "Publish dry-run missing $required"
-done
+pack_json="$(pnpm pack --dry-run --json)" || fail "Pack dry-run"
+PACK_JSON="$pack_json" node <<'NODE'
+const pack = JSON.parse(process.env.PACK_JSON);
+const files = new Set((Array.isArray(pack) ? pack[0].files : pack.files).map((file) => file.path));
 
-for forbidden in "tests/" "scripts/" ".agents/" ".tickets/" "src/"; do
-  [[ "$publish_output" == *"$forbidden"* ]] && fail "Publish dry-run unexpectedly includes $forbidden"
-done
+const required = [
+  "README.md",
+  "CHANGELOG.md",
+  "SECURITY.md",
+  "LICENSE",
+  "package.json",
+  "dist/esm/index.js",
+  "dist/cjs/index.js",
+];
+
+for (const path of required) {
+  if (!files.has(path)) {
+    console.error(`Pack dry-run missing ${path}`);
+    process.exit(1);
+  }
+}
+
+const forbiddenPrefixes = ["tests/", "scripts/", ".agents/", ".tickets/", "src/"];
+const forbidden = [...files].filter((path) =>
+  forbiddenPrefixes.some((prefix) => path.startsWith(prefix)),
+);
+
+if (forbidden.length > 0) {
+  console.error(`Pack dry-run unexpectedly includes: ${forbidden.join(", ")}`);
+  process.exit(1);
+}
+NODE
 
 run "All dependency tickets are closed" node <<'NODE'
 const { readFileSync } = require("node:fs");
