@@ -94,7 +94,7 @@ interface LatencyMeasure {
 }
 
 /** Tracker that collects latency measurements by ID. */
-// biome-ignore lint/complexity/noStaticOnlyClass: PLAN.md §6.1 / ost-z6c3 restructures profiling as a subpath — module-function conversion happens there.
+// biome-ignore lint/complexity/noStaticOnlyClass: public profiling API intentionally exposes static utility methods.
 export class LatencyTracker {
   private static logger: OjinLogger = createConsoleLogger("info");
   // Backing fields — undefined until first access so that importing this module

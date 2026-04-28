@@ -1,7 +1,7 @@
 /**
  * Tests for ost-a8h9: logger injection, error mapping, and plain-text frame handling.
  *
- * Covers PLAN.md §5.3, §5.4, defects D8, D15, D17.
+ * Covers logger injection, rate-limit mapping, and malformed-frame defects.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebSocket as WS } from "ws";

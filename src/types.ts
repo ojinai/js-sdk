@@ -216,8 +216,7 @@ export interface OjinClientOptions {
  * These options were removed or renamed in v1.0. The SDK does NOT silently
  * alias them because doing so would hide a 1000× unit-conversion bug
  * (`reconnectDelay` was in **seconds**; the v1.0 replacement uses
- * **milliseconds**).  Loud failure at construction is the cheap mitigation
- * (PLAN.md §11.1 / FE-review finding 16).
+ * **milliseconds**).  Loud failure at construction is the cheap mitigation.
  *
  * @internal — called by `OjinClient` constructor before any other setup.
  */

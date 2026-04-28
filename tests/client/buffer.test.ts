@@ -1,7 +1,7 @@
 /**
  * Tests for the outgoingQueue config and QueueFullError overflow modes (ost-i7p5).
  *
- * Covers PLAN.md §4.4 / FE-review findings 11, 12:
+ * Covers outgoing queue overflow and reconnect-flush behavior:
  *  - onOverflow: "reject" (default) — 3rd send into a maxMessages:2 queue
  *    rejects with QueueFullError carrying queueDepth and maxMessages details.
  *  - onOverflow: "dropOldest" — oldest buffered message is ejected when the

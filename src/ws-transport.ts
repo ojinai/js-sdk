@@ -4,7 +4,7 @@
  * @ojinai/js-sdk v1.0 is a Node-only SDK. Apps must consume this from their
  * own backend and expose their own client-facing transport. The SDK must not
  * be loaded in a browser or any untrusted runtime; no browser WebSocket
- * implementation is shipped. See PLAN.md §2.2 and §4.1.
+ * implementation is shipped.
  *
  * This module re-exports {@link WSTransport} and delegates
  * {@link createWSTransport} to the heartbeat-enabled {@link NodeWSTransport}
@@ -24,9 +24,8 @@ export type { WSTransport };
  * Create the default Node.js WebSocket transport backed by the `ws` package.
  *
  * Delegates to {@link createNodeWSTransport} which includes the
- * client-originated heartbeat ping logic (ost-q6x3 / PLAN.md §5.2). The
- * interval is `.unref()`'d so it never holds the Node event loop open past
- * `close()`.
+ * client-originated heartbeat ping logic. The interval is `.unref()`'d so it
+ * never holds the Node event loop open past `close()`.
  *
  * Intended for use by {@link OjinClient}. Pass the returned instance as
  * `options.transport` when constructing a client, or rely on the default

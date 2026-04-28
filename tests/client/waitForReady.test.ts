@@ -2,7 +2,7 @@
  * Tests for OjinClient.waitForReady(), ReadyTimeoutError, and the
  * session.waiting_for_ready event (ost-g5n1).
  *
- * Covers PLAN.md §4.5:
+ * Covers waitForReady timeout and cancellation behavior:
  *  - Resolves immediately when already ready (cached SessionReady).
  *  - Resolves on the next session.ready event.
  *  - Rejects with ReadyTimeoutError (with details) after timeoutMs.

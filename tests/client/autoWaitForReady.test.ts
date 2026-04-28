@@ -1,7 +1,7 @@
 /**
  * Tests for the autoWaitForReady option and pre-ready message buffer (ost-h6o3).
  *
- * Covers PLAN.md §4.5 / FE-review finding 5:
+ * Covers readiness waiting and pre-ready send behavior:
  *  - Default (autoWaitForReady: false) — sendMessage throws ConnectionError
  *    immediately when the inference server is not yet ready (v0.1 semantics).
  *  - autoWaitForReady: true — three messages queued before session.ready are

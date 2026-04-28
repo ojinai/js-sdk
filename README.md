@@ -238,7 +238,7 @@ pnpm test              # Run tests
 pnpm run lint          # Lint + format (auto-fix)
 pnpm run lint:check    # Lint + format (read-only; what CI runs)
 pnpm run typecheck     # Type-check only
-pnpm run integration:check  # Final release gate from PLAN.md §15.1
+pnpm run integration:check  # Final local release gate
 pnpm run precommit     # Fast local gate (lint:check + typecheck + test)
 pnpm run prepush       # Full local gate (lint:check + typecheck + test + security)
 ```

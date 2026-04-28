@@ -1,7 +1,7 @@
 /**
  * Tests for NodeWSTransport heartbeat pings (ost-q6x3).
  *
- * Covers PLAN.md §5.2 / FE-review finding 17:
+ * Covers Node heartbeat lifecycle behavior:
  *  - Heartbeat fires at the configured interval after connect.
  *  - The interval handle is `.unref()`'d immediately (no process hold-open).
  *  - On `close()`, the interval is cleared synchronously before the socket.
@@ -248,7 +248,7 @@ describe("NodeWSTransport heartbeat", () => {
     transport.close();
   });
 
-  // ── No-leaked-handle proof (FE-review finding 17) ─────────────────────────
+  // ── No-leaked-handle proof ────────────────────────────────────────────────
 
   it("active handle count returns to baseline after connect + close", {
     timeout: 3000,

@@ -1,7 +1,7 @@
 /**
  * Property-based tests for the WebSocket connection URL builder.
  *
- * Invariant (PLAN.md §9.3):
+ * Invariant:
  *   For any configId and apiKey — including values that contain URL-reserved
  *   characters such as `?`, `&`, `=`, `#`, `/`, `+`, and full Unicode code
  *   points — the parameters survive the round-trip:

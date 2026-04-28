@@ -123,12 +123,10 @@ export class OjinClient {
    * Timestamps (ms) of messages dispatched within the rolling 1-second
    * window.  Entries older than 1000 ms are pruned before each dispatch.
    *
-   * NOTE (FE-review finding #24): the server's published rate limit is 6
-   * req/sec **per connection**.  If the actual server-side enforcement is
-   * per-account (undocumented), this client-side throttle is best-effort and
-   * `RATE_LIMITED` can still fire even when the client stays within budget.
-   * The retry path for server-originated RATE_LIMITED errors is in ost-v2y5
-   * and is NOT implemented here.
+   * NOTE: the server's published rate limit is 6 req/sec **per connection**.
+   * If the actual server-side enforcement is per-account (undocumented), this
+   * client-side throttle is best-effort and `RATE_LIMITED` can still fire even
+   * when the client stays within budget.
    */
   private _throttleTimestamps: number[] = [];
   /** FIFO queue of messages waiting for a throttle slot to open. */
@@ -227,8 +225,7 @@ export class OjinClient {
     this._maxRequestsPerSecond = options.maxRequestsPerSecond ?? 6;
     // Reset throttle budget on every new connection.  Per-connection semantics
     // mean a reconnect always starts with a full budget — not inheriting the
-    // (potentially exhausted) budget from the previous transport instance
-    // (FE-review finding #24).
+    // (potentially exhausted) budget from the previous transport instance.
     this.events.on(OjinEvent.ConnectionOpened, () => this._resetThrottle());
   }
 
@@ -353,7 +350,7 @@ export class OjinClient {
 
     // Abort BEFORE transport teardown so every in-flight sleep, backoff wait,
     // and waitForReady call receives a deterministic rejection rather than
-    // hanging until its own timeout fires (FE-review finding 18).
+    // hanging until its own timeout fires.
     this.abortController.abort();
 
     this.setConnectionState(ConnectionState.Disconnecting);
@@ -390,11 +387,11 @@ export class OjinClient {
    *
    * Emits `OjinEvent.WaitingForReady` exactly once when the first concurrent
    * caller enters the wait — not once per concurrent caller. This gives UIs a
-   * one-shot signal to render a spinner (FE-review finding 5).
+   * one-shot signal to render a spinner.
    *
    * The wait is tied to the same per-instance `AbortController` used by the
    * reconnect backoff sleeps, so a concurrent `close()` always rejects this
-   * promise deterministically (FE-review finding 18).
+   * promise deterministically.
    *
    * @param timeoutMs - Maximum wait in milliseconds (default: 10 000).
    */
@@ -1214,9 +1211,8 @@ export class OjinClient {
    *
    * Called on every `connection.opened` event so that each new transport
    * connection starts with a full budget (per-connection semantics, not
-   * session-lifetime — FE-review finding #24).  Any messages that were queued
-   * before the reconnect are immediately eligible for dispatch on the fresh
-   * connection.
+   * session-lifetime). Any messages that were queued before the reconnect are
+   * immediately eligible for dispatch on the fresh connection.
    */
   private _resetThrottle(): void {
     this._throttleTimestamps = [];
