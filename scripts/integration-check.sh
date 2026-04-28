@@ -162,15 +162,33 @@ for (const snippet of requiredSnippets) {
 }
 NODE
 
-assert_count_ge \
-  "CHANGELOG keeps the main Keep a Changelog sections" \
-  5 \
-  "$(grep -Ec '^### Added|^### Changed|^### Removed|^### Fixed|^### Breaking changes' CHANGELOG.md)"
+run "CHANGELOG describes the public v1 release" node <<'NODE'
+const { readFileSync } = require("node:fs");
+const changelog = readFileSync("CHANGELOG.md", "utf8");
 
-assert_count_ge \
-  "CHANGELOG references the shipped D-number set" \
-  17 \
-  "$(grep -Ec 'D1|D2|D3|D4|D5|D6|D7|D8|D9|D11|D12|D13|D14|D15|D17|D18|D19' CHANGELOG.md)"
+const requiredSnippets = [
+  "## [1.0.0-rc]",
+  "Initial public release candidate",
+  "server-side TypeScript SDK",
+  "Node.js",
+  "### Added",
+  "Node WebSocket heartbeat support",
+  "ESM, CommonJS, and TypeScript declaration outputs",
+];
+
+for (const snippet of requiredSnippets) {
+  if (!changelog.includes(snippet)) {
+    console.error(`CHANGELOG.md must contain: ${snippet}`);
+    process.exit(1);
+  }
+}
+
+const privatePlanningMarkers = /\bD(?:1|2|3|4|5|6|7|8|9|11|12|13|14|15|17|18|19)\b|PLAN\.md|FE-review/;
+if (privatePlanningMarkers.test(changelog)) {
+  console.error("CHANGELOG.md must not include private planning IDs or deleted artifact references");
+  process.exit(1);
+}
+NODE
 
 assert_file "SECURITY.md is present" "SECURITY.md"
 assert_file "CONTRIBUTING.md is present" "CONTRIBUTING.md"
