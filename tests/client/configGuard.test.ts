@@ -1,7 +1,7 @@
 /**
  * Tests for legacy flat-option ConfigurationError guards (ost-j8q9).
  *
- * Covers PLAN.md §11.1 / FE-review finding 16:
+ * Covers v1 migration guard behavior:
  *  - Constructor throws `ConfigurationError` when any v0.1 legacy option is
  *    present: `reconnectDelay`, `reconnectAttempts`, `maxQueuedMessages`,
  *    `maxPendingOutgoing`.

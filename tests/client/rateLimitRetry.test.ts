@@ -1,7 +1,7 @@
 /**
  * Tests for RATE_LIMITED single-retry with 200 ms backoff (ost-v2y5).
  *
- * Covers PLAN.md §5.4:
+ * Covers retry handling after server-side rate limiting:
  *  - Server RATE_LIMITED once → SDK retries after 200 ms; no RateLimitError event.
  *  - Server RATE_LIMITED twice (for the retry) → RateLimitError event fires.
  *  - close() during the 200 ms retry delay → retry cancelled; no late error events.

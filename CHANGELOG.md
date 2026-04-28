@@ -90,8 +90,8 @@ code in v1.0:
 
 ### Breaking changes
 
-The list below tracks the v0.1 -> v1.0 breaking surface from `PLAN.md §11.1`,
-with the shipped repo surface taking precedence where the draft plan diverged.
+The list below tracks the v0.1 -> v1.0 breaking surface, with the shipped repo
+surface taking precedence over earlier draft designs.
 
 1. `sendMessage()` now accepts outbound messages only.
 
@@ -174,7 +174,7 @@ client.events.on(OjinEvent.InteractionResponse, (message) => {
 });
 ```
 
-6. `PLAN.md` drafted a future `session.closed` object payload
+6. Earlier draft designs included a future `session.closed` object payload
    `{ code, reason, disconnectReason }`, but the current repo still ships
    `OjinEvent.ConnectionClosed` as a two-argument callback. Use the exported
    event constant and the current callback shape below.
@@ -187,10 +187,11 @@ client.events.on(OjinEvent.ConnectionClosed, (code, reason) => {
 });
 ```
 
-7. `PLAN.md` also drafted a public simplification from `Uint8Array<ArrayBuffer>`
-   to plain `Uint8Array`. Runtime behavior is unchanged, but the current repo
-   still carries some `Uint8Array<ArrayBuffer>` protocol-class types, so do not
-   rely on that draft simplification when migrating existing code.
+7. Earlier draft designs also included a public simplification from
+   `Uint8Array<ArrayBuffer>` to plain `Uint8Array`. Runtime behavior is
+   unchanged, but the current repo still carries some
+   `Uint8Array<ArrayBuffer>` protocol-class types, so do not rely on that draft
+   simplification when migrating existing code.
 
 ### Scope change: v1.0 is Node-only
 

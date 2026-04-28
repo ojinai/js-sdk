@@ -1,20 +1,16 @@
 /**
  * Negative-path regression tests for the v0.1 → v1.0 migration guards.
  *
- * Covers PLAN.md §9.4 / §11.1 / FE-review finding 16 (ost-l9o2).
- *
  * Guards live in `assertNoLegacyOptions()` (src/types.ts), called from the
  * `OjinClient` constructor (ost-j8q9 / ost-l1s4).  These tests form the
  * regression net that keeps the guards honest: if a guard is silently removed,
  * renamed, or its error message stops mentioning both the old and new option
  * names, at least one assertion here will fail.
  *
- * Spec references
- * ───────────────
- *  - PLAN.md §9.4   — migration-guard test requirements
- *  - PLAN.md §11.1  — flat-rename guards
- *  - PLAN.md §15.1  — v1.0 acceptance: migration-guard tests are gating
- *  - FE-review #16  — original guard-coverage gap report
+ * Coverage focus:
+ *  - migration-guard test requirements
+ *  - flat-rename guards
+ *  - v1.0 acceptance: migration-guard tests are gating
  */
 
 import { describe, expect, it } from "vitest";

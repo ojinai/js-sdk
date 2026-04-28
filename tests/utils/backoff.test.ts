@@ -1,7 +1,7 @@
 /**
  * Tests for `computeBackoff` (ost-l1s4).
  *
- * Covers PLAN.md §5.1 / Appendix A:
+ * Covers exponential backoff behavior:
  *  - All computed delays at attempt N fall within the expected jitter envelope.
  *  - Values are statistically spread (jitter is exercised, not collapsed).
  *  - The delay caps at `maxMs` once the nominal exceeds the ceiling.

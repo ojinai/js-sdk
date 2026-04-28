@@ -2,8 +2,7 @@
  * Node WebSocket transport with client-initiated heartbeat pings.
  *
  * This module is Node-only. The `ws` package exposes `WebSocket.ping()` which
- * is not available in the browser WebSocket API. See PLAN.md §5.2 and
- * FE-review finding 17.
+ * is not available in the browser WebSocket API.
  *
  * Lifecycle rules:
  *  - Heartbeat starts after the WebSocket `open` event.

@@ -5,7 +5,7 @@
  * the timestamp field, which is stored in a 32-bit slot and therefore lossy for
  * real-world timestamps — the invariant is validated for a fixed timestamp).
  *
- * Covers the three axes called out in PLAN.md §9.3:
+ * Covers the three serialization axes:
  *   payloadType  × params  × payloadSize
  *
  * Shrinking is left at fast-check's default (enabled): when a failure is
@@ -71,7 +71,7 @@ describe("InteractionInputMessage property tests", () => {
               payload,
               // Fixed timestamp: the serializer stores only the low 32 bits
               // (real-world Date.now() values overflow that slot). We exclude
-              // the timestamp from the invariant per PLAN.md §9.3.
+              // the timestamp from the invariant.
               timestamp: 1_000_000,
               params,
             },

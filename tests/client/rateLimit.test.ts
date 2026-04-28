@@ -1,7 +1,7 @@
 /**
  * Tests for the maxRequestsPerSecond client-side throttle (ost-u1x4).
  *
- * Covers PLAN.md §5.4 / FE-review finding 24:
+ * Covers client-side rate limiting behavior:
  *  - Default throttle (6 req/sec) limits outbound messages to at most 6 per
  *    rolling 1-second window; excess calls are buffered in the throttle queue.
  *  - maxRequestsPerSecond: Infinity disables throttling entirely.
