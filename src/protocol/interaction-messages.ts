@@ -4,7 +4,7 @@ import { MessageType } from "./session-messages.js";
 // ─── Binary protocol constants ───────────────────────────────────────────────
 
 // Interaction input format: Byte payload type, uint64 timestamp, uint32 params size
-const INTERACTION_INPUT_HEADER_SIZE = 1 + 8 + 4; // 13 bytes
+export const INTERACTION_INPUT_HEADER_SIZE = 1 + 8 + 4; // 13 bytes
 
 // Interaction response format: Byte is_final, 16b UUID, uint64 timestamp,
 // uint32 usage, uint32 index, uint32 num payload entries

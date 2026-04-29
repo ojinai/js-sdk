@@ -24,6 +24,7 @@ import { mapServerError } from "./protocol/error-mapping.js";
 import {
   deserializeInteractionResponseMessage,
   type ErrorResponseMessage,
+  INTERACTION_INPUT_HEADER_SIZE,
 } from "./protocol/interaction-messages.js";
 import { MessageType } from "./protocol/session-messages.js";
 import {
@@ -45,8 +46,10 @@ import { createWSTransport, type WSTransport } from "./ws-transport.js";
 const DEFAULT_AUDIO_CHUNK_SIZE = 500_000;
 /** Smallest allowed audio payload bytes per frame. */
 const MIN_AUDIO_CHUNK_SIZE = 1_024;
-/** Largest allowed audio payload bytes per frame. */
-const MAX_AUDIO_CHUNK_SIZE = 512_000;
+/** Server-side maximum for a complete serialized interaction input frame. */
+const MAX_INTERACTION_INPUT_MESSAGE_BYTES = 512_000;
+/** Largest allowed audio payload bytes per frame before per-message params. */
+const MAX_AUDIO_CHUNK_SIZE = MAX_INTERACTION_INPUT_MESSAGE_BYTES - INTERACTION_INPUT_HEADER_SIZE;
 const NO_RETRY_CLOSE_CODES = new Set<OjinErrorCode>([
   OjinErrorCode.AuthFailed,
   OjinErrorCode.Unauthorized,
@@ -54,6 +57,7 @@ const NO_RETRY_CLOSE_CODES = new Set<OjinErrorCode>([
   OjinErrorCode.InvalidMessage,
   OjinErrorCode.InvalidHeaders,
   OjinErrorCode.ModelNotFound,
+  OjinErrorCode.Timeout,
   OjinErrorCode.FrameSizeExceeded,
 ]);
 
@@ -208,12 +212,12 @@ export class OjinClient {
     };
     this.audioChunkSize = options.audioChunkSize ?? DEFAULT_AUDIO_CHUNK_SIZE;
     if (
-      !Number.isFinite(this.audioChunkSize) ||
+      !Number.isInteger(this.audioChunkSize) ||
       this.audioChunkSize < MIN_AUDIO_CHUNK_SIZE ||
       this.audioChunkSize > MAX_AUDIO_CHUNK_SIZE
     ) {
       throw new ConfigurationError(
-        `\`audioChunkSize\` must be between ${MIN_AUDIO_CHUNK_SIZE} and ${MAX_AUDIO_CHUNK_SIZE} bytes.`,
+        `\`audioChunkSize\` must be an integer between ${MIN_AUDIO_CHUNK_SIZE} and ${MAX_AUDIO_CHUNK_SIZE} bytes.`,
       );
     }
     this.logger = options.logger ?? createConsoleLogger("warn");
@@ -995,11 +999,28 @@ export class OjinClient {
       if (responseTimeoutMs <= 0 || responseTimeoutMs === Infinity) {
         return;
       }
+      const elapsedMs = Date.now() - startMs;
+      const remainingMs = responseTimeoutMs - elapsedMs;
+      if (remainingMs <= 0) {
+        fail(
+          new TimeoutError(
+            OjinErrorCode.Timeout,
+            `Timed out waiting for the final interaction response after ${responseTimeoutMs}ms`,
+            {
+              responseTimeoutMs,
+              elapsedMs,
+              lastConnectionState: this._connectionState,
+              interactionId,
+            },
+          ),
+        );
+        return;
+      }
       timeout = scheduleTimeout(() => {
         fail(
           new TimeoutError(
             OjinErrorCode.Timeout,
-            `Timed out waiting for the next interaction response after ${responseTimeoutMs}ms`,
+            `Timed out waiting for the final interaction response after ${responseTimeoutMs}ms`,
             {
               responseTimeoutMs,
               elapsedMs: Date.now() - startMs,
@@ -1025,8 +1046,6 @@ export class OjinClient {
       queue.push(message);
       if (message.isFinalResponse) {
         finish();
-      } else {
-        scheduleResponseTimeout();
       }
       settlePendingIfPossible();
     });
@@ -1362,14 +1381,19 @@ export class OjinClient {
     if (userInitiated) {
       return DisconnectReason.ClientInitiated;
     }
-    if (this.hasNoRetryCloseCode()) {
-      return DisconnectReason.AuthenticationFailed;
+    if (this._lastCloseErrorCode !== null) {
+      switch (this._lastCloseErrorCode) {
+        case OjinErrorCode.AuthFailed:
+        case OjinErrorCode.Unauthorized:
+          return DisconnectReason.AuthenticationFailed;
+        case OjinErrorCode.Timeout:
+          return DisconnectReason.SessionTimeout;
+        default:
+          return DisconnectReason.ServerInitiated;
+      }
     }
     if (this.isInboundStale()) {
       return DisconnectReason.ConnectionLost;
-    }
-    if (this._lastCloseErrorCode !== null) {
-      return DisconnectReason.ServerInitiated;
     }
     return DisconnectReason.Unknown;
   }
@@ -1620,14 +1644,26 @@ export class OjinClient {
 
   private chunkAndSendAudio(message: OjinAudioInputMessage): void {
     const audioBytes = message.audioInt16Bytes;
+    const paramsBytes = message.params
+      ? new TextEncoder().encode(JSON.stringify(message.params)).length
+      : 0;
+    const maxPayloadBytes =
+      MAX_INTERACTION_INPUT_MESSAGE_BYTES - INTERACTION_INPUT_HEADER_SIZE - paramsBytes;
+
+    if (maxPayloadBytes <= 0) {
+      throw new ConfigurationError(
+        "`audio` params are too large to fit inside the server message size limit.",
+      );
+    }
+    const chunkSize = Math.min(this.audioChunkSize, maxPayloadBytes);
 
     if (audioBytes.length === 0) {
       this.wsSend(new OjinAudioInputMessage(new Uint8Array(0), message.params).toBytes());
       return;
     }
 
-    for (let i = 0; i < audioBytes.length; i += this.audioChunkSize) {
-      const end = Math.min(i + this.audioChunkSize, audioBytes.length);
+    for (let i = 0; i < audioBytes.length; i += chunkSize) {
+      const end = Math.min(i + chunkSize, audioBytes.length);
       const chunk = audioBytes.subarray(i, end);
       const chunkMsg = new OjinAudioInputMessage(new Uint8Array(chunk), message.params);
       this.wsSend(chunkMsg.toBytes());

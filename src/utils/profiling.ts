@@ -96,7 +96,7 @@ interface LatencyMeasure {
 /** Tracker that collects latency measurements by ID. */
 // biome-ignore lint/complexity/noStaticOnlyClass: public profiling API intentionally exposes static utility methods.
 export class LatencyTracker {
-  private static logger: OjinLogger = createConsoleLogger("info");
+  private static _logger?: OjinLogger;
   // Backing fields — undefined until first access so that importing this module
   // has no top-level side effects (required for Rollup preserveModules tree-shaking).
   private static _measures?: Map<string, LatencyMeasure[]>;
@@ -125,6 +125,12 @@ export class LatencyTracker {
     if (LatencyTracker._sampleMin === undefined) LatencyTracker._sampleMin = new Map();
     return LatencyTracker._sampleMin;
   }
+  private static get logger(): OjinLogger {
+    if (LatencyTracker._logger === undefined) {
+      LatencyTracker._logger = createConsoleLogger("info");
+    }
+    return LatencyTracker._logger;
+  }
 
   /** Clear accumulated latency state. */
   static reset(): void {
@@ -139,7 +145,17 @@ export class LatencyTracker {
 
   /** Replace the logger used by warning and summary output. */
   static setLogger(logger: OjinLogger): void {
-    LatencyTracker.logger = logger;
+    if (
+      logger == null ||
+      typeof logger.debug !== "function" ||
+      typeof logger.info !== "function" ||
+      typeof logger.warn !== "function" ||
+      typeof logger.error !== "function" ||
+      typeof logger.isLevelEnabled !== "function"
+    ) {
+      throw new TypeError("LatencyTracker.setLogger expects an OjinLogger-compatible object");
+    }
+    LatencyTracker._logger = logger;
   }
 
   private static recordSample(measureId: string, durationMs: number): void {

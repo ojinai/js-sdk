@@ -346,6 +346,35 @@ describe("OjinClient convenience senders", () => {
 
       await assertion;
     });
+
+    it("uses responseTimeoutMs as a total deadline across streamed frames", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
+
+      const stream = client.streamTextTurn("hello", undefined, { responseTimeoutMs: 1_000 });
+      const first = stream.next();
+      await Promise.resolve();
+
+      const partial = new OjinInteractionResponseMessage(
+        "550e8400-e29b-41d4-a716-446655440000",
+        new Uint8Array(0),
+        new Uint8Array([1]),
+        false,
+        1,
+      );
+
+      client.events.emit(OjinEvent.InteractionResponse, partial);
+      await expect(first).resolves.toEqual({ value: partial, done: false });
+
+      const second = stream.next();
+      const assertion = expect(second).rejects.toMatchObject({
+        code: OjinErrorCode.Timeout,
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await assertion;
+    });
   });
 
   // ── sendAudio ─────────────────────────────────────────────────────────────────

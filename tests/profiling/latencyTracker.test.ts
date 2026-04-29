@@ -72,6 +72,17 @@ describe("LatencyTracker — no module-load side effects", () => {
 
     expect(mapCtorCalls).toBe(0);
   });
+
+  it("importing the module does not create the default logger", async () => {
+    vi.resetModules();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    await import("../../src/utils/profiling.js");
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ─── Public behaviour — start / stop / stats ─────────────────────────────────
@@ -163,5 +174,9 @@ describe("LatencyTracker — start / stop / stats", () => {
     LatencyTracker.log();
 
     expect(logSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("setLogger rejects malformed logger objects", () => {
+    expect(() => LatencyTracker.setLogger({ warn() {} } as never)).toThrow(TypeError);
   });
 });

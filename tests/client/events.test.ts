@@ -93,7 +93,7 @@ describe("OjinClient session.closed disconnect reasons", () => {
     });
   });
 
-  it("maps auth no-retry close to authentication_failed", async () => {
+  it("maps auth close errors to authentication_failed", async () => {
     let socket: WS | null = null;
 
     wss.on("connection", (ws) => {
@@ -123,6 +123,66 @@ describe("OjinClient session.closed disconnect reasons", () => {
         disconnectReason: DisconnectReason.AuthenticationFailed,
       },
     ]);
+  });
+
+  it("maps server timeout errors to session_timeout", async () => {
+    let socket: WS | null = null;
+
+    wss.on("connection", (ws) => {
+      socket = ws;
+      ws.send(sessionReadyFrame());
+    });
+
+    const client = makeClient();
+    let closed: { code: number; reason: string; disconnectReason: DisconnectReason } | null = null;
+
+    client.events.on(OjinEvent.ConnectionClosed, (payload) => {
+      closed = payload;
+    });
+
+    await client.connect();
+    await waitUntil(() => client.isServerReady);
+
+    socket?.send(errorFrame(OjinErrorCode.Timeout, "session timed out"));
+    socket?.close(4000, "session timed out");
+
+    await waitUntil(() => closed !== null);
+
+    expect(closed).toEqual({
+      code: 4000,
+      reason: "session timed out",
+      disconnectReason: DisconnectReason.SessionTimeout,
+    });
+  });
+
+  it("maps non-auth no-retry close errors to server_initiated", async () => {
+    let socket: WS | null = null;
+
+    wss.on("connection", (ws) => {
+      socket = ws;
+      ws.send(sessionReadyFrame());
+    });
+
+    const client = makeClient({ autoReconnect: false });
+    let closed: { code: number; reason: string; disconnectReason: DisconnectReason } | null = null;
+
+    client.events.on(OjinEvent.ConnectionClosed, (payload) => {
+      closed = payload;
+    });
+
+    await client.connect();
+    await waitUntil(() => client.isServerReady);
+
+    socket?.send(errorFrame(OjinErrorCode.MissingConfigId, "missing config"));
+    socket?.close(4002, "missing config");
+
+    await waitUntil(() => closed !== null);
+
+    expect(closed).toEqual({
+      code: 4002,
+      reason: "missing config",
+      disconnectReason: DisconnectReason.ServerInitiated,
+    });
   });
 
   it("maps reconnect exhaustion to reconnect_failed", async () => {
