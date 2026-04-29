@@ -61,6 +61,7 @@
     "security:sast": "semgrep scan --config=auto --error --quiet",
     "security:audit": "pnpm audit --audit-level=moderate",
     "clean": "rm -rf dist coverage",
+    "prepare": "pnpm run build",
     "prepublishOnly": "pnpm run build"
   },
   "keywords": [
