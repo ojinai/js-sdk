@@ -147,8 +147,8 @@ new OjinClient(options: OjinClientOptions)
 | `waitForReady(timeoutMs?): Promise<OjinSessionReadyMessage>` | Resolves when the inference server is ready (default timeout: 10 s) |
 | `sendText(text, params?): Promise<void>` | Send only the text input frame |
 | `sendTextTurn(text, params?): Promise<void>` | Send text and then end the turn |
-| `sendTextTurnAndWait(text, params?, options?): Promise<OjinInteractionResponseMessage>` | Send text, end the turn, and resolve on the final speech frame |
-| `streamTextTurn(text, params?, options?): AsyncGenerator<OjinInteractionResponseMessage, void, void>` | Send text, end the turn, and stream speech frames for just that turn |
+| `sendTextTurnAndWait(text, params?, options?): Promise<OjinInteractionResponseMessage>` | Send text, end the turn, and resolve on the final speech frame. `options.readyTimeoutMs` bounds readiness waiting; `options.responseTimeoutMs` bounds the final-response wait after the turn is sent. |
+| `streamTextTurn(text, params?, options?): AsyncGenerator<OjinInteractionResponseMessage, void, void>` | Send text, end the turn, and stream speech frames for just that turn. Uses the same `readyTimeoutMs` and `responseTimeoutMs` options. |
 | `sendAudio(pcm, params?): Promise<void>` | Send PCM int16 audio bytes |
 | `interrupt(): Promise<void>` | Cancel the in-flight interaction |
 | `endInteraction(): Promise<void>` | End the current interaction |
@@ -156,6 +156,11 @@ new OjinClient(options: OjinClientOptions)
 | `isConnected(): boolean` | Current connection check |
 
 **Getters:** `connectionState: ConnectionState`, `isServerReady: boolean`
+
+`sendTextTurnAndWait()` and `streamTextTurn()` are single-turn helpers. They
+reject concurrent helper calls on the same client with `ConfigurationError`; use
+separate client instances for parallel turns, and avoid mixing manual low-level
+turn traffic with these helpers on the same client.
 
 ### Message classes
 

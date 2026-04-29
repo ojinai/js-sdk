@@ -6,7 +6,10 @@ import {
   OjinClient,
 } from "../../src/index.js";
 import { OjinSessionReadyMessage } from "../../src/protocol/client-messages.js";
-import { deserializeInteractionInputMessage } from "../../src/protocol/interaction-messages.js";
+import {
+  deserializeInteractionInputMessage,
+  INTERACTION_INPUT_HEADER_SIZE,
+} from "../../src/protocol/interaction-messages.js";
 
 interface OjinClientTestInternals {
   _connectionState: ConnectionState;
@@ -29,6 +32,9 @@ function makeClient(overrides?: Partial<ConstructorParameters<typeof OjinClient>
   });
 }
 
+const MAX_SERVER_MESSAGE_BYTES = 512_000;
+const MAX_AUDIO_CHUNK_SIZE = MAX_SERVER_MESSAGE_BYTES - INTERACTION_INPUT_HEADER_SIZE;
+
 describe("OjinClient audioChunkSize", () => {
   it("defaults audioChunkSize to 500_000 bytes", () => {
     const client = makeClient();
@@ -46,11 +52,13 @@ describe("OjinClient audioChunkSize", () => {
   });
 
   it("accepts audioChunkSize at the safe upper bound", () => {
-    expect(() => makeClient({ audioChunkSize: 511_987 })).not.toThrow();
+    expect(() => makeClient({ audioChunkSize: MAX_AUDIO_CHUNK_SIZE })).not.toThrow();
   });
 
   it("throws ConfigurationError when audioChunkSize exceeds the safe upper bound", () => {
-    expect(() => makeClient({ audioChunkSize: 512_000 })).toThrow(ConfigurationError);
+    expect(() => makeClient({ audioChunkSize: MAX_SERVER_MESSAGE_BYTES })).toThrow(
+      ConfigurationError,
+    );
   });
 
   it("throws ConfigurationError when audioChunkSize is fractional", () => {
@@ -84,7 +92,7 @@ describe("OjinClient audioChunkSize", () => {
   });
 
   it("reserves room for params when chunking near the server message limit", async () => {
-    const client = makeClient({ audioChunkSize: 511_987 });
+    const client = makeClient({ audioChunkSize: MAX_AUDIO_CHUNK_SIZE });
     const internals = client as unknown as OjinClientTestInternals;
     const sentFrames: Uint8Array[] = [];
 
@@ -104,6 +112,6 @@ describe("OjinClient audioChunkSize", () => {
     await client.sendMessage(new OjinAudioInputMessage(new Uint8Array(512_000), { voiceId: "en" }));
 
     expect(sentFrames.length).toBeGreaterThan(1);
-    expect(sentFrames.every((frame) => frame.length <= 512_000)).toBe(true);
+    expect(sentFrames.every((frame) => frame.length <= MAX_SERVER_MESSAGE_BYTES)).toBe(true);
   });
 });

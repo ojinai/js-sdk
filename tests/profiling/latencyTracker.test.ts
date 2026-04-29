@@ -8,6 +8,7 @@ describe("LatencyTracker — no module-load side effects", () => {
     LatencyTracker.reset();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.doUnmock("../../src/utils/logger.js");
   });
 
   it("importing the module does not instantiate any Map", async () => {
@@ -75,13 +76,27 @@ describe("LatencyTracker — no module-load side effects", () => {
 
   it("importing the module does not create the default logger", async () => {
     vi.resetModules();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const logger = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      isLevelEnabled: vi.fn(() => true),
+      warn: vi.fn(),
+    };
+    const createConsoleLogger = vi.fn(() => logger);
+    vi.doMock("../../src/utils/logger.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../../src/utils/logger.js")>();
+      return { ...actual, createConsoleLogger };
+    });
 
-    await import("../../src/utils/profiling.js");
+    const mod = await import("../../src/utils/profiling.js");
 
-    expect(warnSpy).not.toHaveBeenCalled();
-    expect(infoSpy).not.toHaveBeenCalled();
+    expect(createConsoleLogger).not.toHaveBeenCalled();
+
+    mod.LatencyTracker.startLatencyMeasure("lazy-logger");
+    mod.LatencyTracker.startLatencyMeasure("lazy-logger");
+
+    expect(createConsoleLogger).toHaveBeenCalledTimes(1);
   });
 });
 

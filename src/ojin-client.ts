@@ -515,9 +515,10 @@ export class OjinClient {
    * continue to use `sendTextTurn()` plus `OjinEvent.InteractionResponse`.
    *
    * The helper ignores idle frames and waits for the next speech interaction
-   * that begins after this call starts listening. Once the first speech frame
+   * that begins after the turn has been sent. Once the first speech frame
    * arrives, subsequent frames are matched by `interactionId` until the final
-   * frame for that interaction is received.
+   * frame for that interaction is received. Do not mix this helper with other
+   * in-flight turns on the same client.
    */
   async sendTextTurnAndWait(
     text: string,
@@ -537,6 +538,7 @@ export class OjinClient {
       const pending = this.waitForFinalSpeechResponse(options?.responseTimeoutMs ?? 15_000);
       try {
         await this.sendTextTurn(text, params);
+        pending.arm();
         return await pending.promise;
       } finally {
         pending.cleanup();
@@ -553,7 +555,8 @@ export class OjinClient {
    * `interactionResponse` event stream. Idle frames are ignored. The iterator
    * binds to the first speech `interactionId` that arrives after the turn is
    * sent, yields frames for that interaction in arrival order, and completes
-   * after the terminal frame (`isFinalResponse: true`) is yielded.
+   * after the terminal frame (`isFinalResponse: true`) is yielded. Do not mix
+   * this helper with other in-flight turns on the same client.
    */
   async *streamTextTurn(
     text: string,
@@ -573,6 +576,7 @@ export class OjinClient {
       const stream = this.createSpeechResponseStream(options?.responseTimeoutMs ?? 15_000);
       try {
         await this.sendTextTurn(text, params);
+        stream.arm();
         while (true) {
           const next = await stream.iterator.next();
           if (next.done) {
@@ -819,10 +823,12 @@ export class OjinClient {
   }
 
   private waitForFinalSpeechResponse(responseTimeoutMs: number): {
+    arm: () => void;
     cleanup: () => void;
     promise: Promise<OjinInteractionResponseMessage>;
   } {
-    const startMs = Date.now();
+    let startMs: number | null = null;
+    let armed = false;
     let timeout: TimeoutHandle | null = null;
     let interactionId: string | null = null;
     let settled = false;
@@ -842,8 +848,40 @@ export class OjinClient {
       offClosed?.();
     };
 
+    const elapsedMs = () => (startMs === null ? 0 : Date.now() - startMs);
+
+    const arm = () => {
+      if (settled || armed) {
+        return;
+      }
+      armed = true;
+      startMs = Date.now();
+      if (responseTimeoutMs > 0 && responseTimeoutMs !== Infinity) {
+        timeout = scheduleTimeout(() => {
+          cleanup();
+          rejectPromise(
+            new TimeoutError(
+              OjinErrorCode.Timeout,
+              `Timed out waiting for the final interaction response after ${responseTimeoutMs}ms`,
+              {
+                responseTimeoutMs,
+                elapsedMs: elapsedMs(),
+                lastConnectionState: this._connectionState,
+                interactionId,
+              },
+            ),
+          );
+        }, responseTimeoutMs);
+      }
+    };
+
+    let rejectPromise: (error: Error) => void = () => {};
     const promise = new Promise<OjinInteractionResponseMessage>((resolve, reject) => {
+      rejectPromise = reject;
       offResponse = this.events.on(OjinEvent.InteractionResponse, (message) => {
+        if (!armed) {
+          return;
+        }
         if (message.frameType !== FrameType.Speech) {
           return;
         }
@@ -874,41 +912,25 @@ export class OjinClient {
                 code,
                 reason,
                 disconnectReason,
-                elapsedMs: Date.now() - startMs,
+                elapsedMs: elapsedMs(),
                 interactionId,
               },
             ),
           );
         },
       );
-
-      if (responseTimeoutMs > 0 && responseTimeoutMs !== Infinity) {
-        timeout = scheduleTimeout(() => {
-          cleanup();
-          reject(
-            new TimeoutError(
-              OjinErrorCode.Timeout,
-              `Timed out waiting for the final interaction response after ${responseTimeoutMs}ms`,
-              {
-                responseTimeoutMs,
-                elapsedMs: Date.now() - startMs,
-                lastConnectionState: this._connectionState,
-                interactionId,
-              },
-            ),
-          );
-        }, responseTimeoutMs);
-      }
     });
 
-    return { cleanup, promise };
+    return { arm, cleanup, promise };
   }
 
   private createSpeechResponseStream(responseTimeoutMs: number): {
+    arm: () => void;
     cleanup: () => void;
     iterator: AsyncGenerator<OjinInteractionResponseMessage, void, void>;
   } {
-    const startMs = Date.now();
+    let startMs: number | null = null;
+    let armed = false;
     const queue: OjinInteractionResponseMessage[] = [];
     let timeout: TimeoutHandle | null = null;
     let interactionId: string | null = null;
@@ -936,6 +958,8 @@ export class OjinClient {
         timeout = null;
       }
     };
+
+    const elapsedMs = () => (startMs === null ? 0 : Date.now() - startMs);
 
     const settlePendingIfPossible = () => {
       if (resume === null) {
@@ -999,8 +1023,8 @@ export class OjinClient {
       if (responseTimeoutMs <= 0 || responseTimeoutMs === Infinity) {
         return;
       }
-      const elapsedMs = Date.now() - startMs;
-      const remainingMs = responseTimeoutMs - elapsedMs;
+      const elapsed = elapsedMs();
+      const remainingMs = responseTimeoutMs - elapsed;
       if (remainingMs <= 0) {
         fail(
           new TimeoutError(
@@ -1008,7 +1032,7 @@ export class OjinClient {
             `Timed out waiting for the final interaction response after ${responseTimeoutMs}ms`,
             {
               responseTimeoutMs,
-              elapsedMs,
+              elapsedMs: elapsed,
               lastConnectionState: this._connectionState,
               interactionId,
             },
@@ -1023,16 +1047,28 @@ export class OjinClient {
             `Timed out waiting for the final interaction response after ${responseTimeoutMs}ms`,
             {
               responseTimeoutMs,
-              elapsedMs: Date.now() - startMs,
+              elapsedMs: elapsedMs(),
               lastConnectionState: this._connectionState,
               interactionId,
             },
           ),
         );
-      }, responseTimeoutMs);
+      }, remainingMs);
+    };
+
+    const arm = () => {
+      if (completed || failure !== null || armed) {
+        return;
+      }
+      armed = true;
+      startMs = Date.now();
+      scheduleResponseTimeout();
     };
 
     offResponse = this.events.on(OjinEvent.InteractionResponse, (message) => {
+      if (!armed) {
+        return;
+      }
       if (message.frameType !== FrameType.Speech) {
         return;
       }
@@ -1063,14 +1099,12 @@ export class OjinClient {
             code,
             reason,
             disconnectReason,
-            elapsedMs: Date.now() - startMs,
+            elapsedMs: elapsedMs(),
             interactionId,
           },
         ),
       );
     });
-
-    scheduleResponseTimeout();
 
     const iterator = (async function* (
       nextFrame: () => Promise<IteratorResult<OjinInteractionResponseMessage, void>>,
@@ -1108,7 +1142,7 @@ export class OjinClient {
       );
     }, cleanup);
 
-    return { cleanup, iterator };
+    return { arm, cleanup, iterator };
   }
 
   // ── Throttle helpers ────────────────────────────────────────────────────────

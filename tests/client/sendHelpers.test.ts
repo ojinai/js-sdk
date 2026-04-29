@@ -158,6 +158,7 @@ describe("OjinClient convenience senders", () => {
         { readyTimeoutMs: 45_000, responseTimeoutMs: 2_000 },
       );
       await Promise.resolve();
+      await Promise.resolve();
 
       const idle = new OjinInteractionResponseMessage(
         NIL_UUID,
@@ -231,6 +232,40 @@ describe("OjinClient convenience senders", () => {
       await assertion;
     });
 
+    it("ignores speech frames and starts the response timeout only after the turn is sent", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      let finishSendTextTurn!: () => void;
+      vi.spyOn(client, "sendTextTurn").mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishSendTextTurn = resolve;
+        }),
+      );
+
+      const result = client.sendTextTurnAndWait("hello", undefined, { responseTimeoutMs: 1_000 });
+      await Promise.resolve();
+
+      client.events.emit(
+        OjinEvent.InteractionResponse,
+        new OjinInteractionResponseMessage(
+          "11111111-1111-4111-8111-111111111111",
+          new Uint8Array(0),
+          new Uint8Array([1]),
+          true,
+          0,
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      finishSendTextTurn();
+      await Promise.resolve();
+
+      const assertion = expect(result).rejects.toMatchObject({ code: OjinErrorCode.Timeout });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await assertion;
+    });
+
     it("rejects when the connection closes before the final frame arrives", async () => {
       vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
       vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
@@ -263,6 +298,7 @@ describe("OjinClient convenience senders", () => {
       );
 
       const first = stream.next();
+      await Promise.resolve();
       await Promise.resolve();
 
       client.events.emit(
@@ -355,6 +391,7 @@ describe("OjinClient convenience senders", () => {
       const stream = client.streamTextTurn("hello", undefined, { responseTimeoutMs: 1_000 });
       const first = stream.next();
       await Promise.resolve();
+      await Promise.resolve();
 
       const partial = new OjinInteractionResponseMessage(
         "550e8400-e29b-41d4-a716-446655440000",
@@ -374,6 +411,48 @@ describe("OjinClient convenience senders", () => {
       await vi.advanceTimersByTimeAsync(1_000);
 
       await assertion;
+    });
+
+    it("ignores speech frames and starts the response timeout only after the turn is sent", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      let finishSendTextTurn!: () => void;
+      vi.spyOn(client, "sendTextTurn").mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishSendTextTurn = resolve;
+        }),
+      );
+
+      const stream = client.streamTextTurn("hello", undefined, { responseTimeoutMs: 1_000 });
+      const first = stream.next();
+      await Promise.resolve();
+
+      client.events.emit(
+        OjinEvent.InteractionResponse,
+        new OjinInteractionResponseMessage(
+          "11111111-1111-4111-8111-111111111111",
+          new Uint8Array(0),
+          new Uint8Array([1]),
+          true,
+          0,
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      finishSendTextTurn();
+      await Promise.resolve();
+
+      const partial = new OjinInteractionResponseMessage(
+        "550e8400-e29b-41d4-a716-446655440000",
+        new Uint8Array(0),
+        new Uint8Array([2]),
+        false,
+        1,
+      );
+      client.events.emit(OjinEvent.InteractionResponse, partial);
+
+      await expect(first).resolves.toEqual({ value: partial, done: false });
+      await stream.return?.();
     });
   });
 
