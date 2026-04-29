@@ -8,6 +8,7 @@ describe("LatencyTracker — no module-load side effects", () => {
     LatencyTracker.reset();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.doUnmock("../../src/utils/logger.js");
   });
 
   it("importing the module does not instantiate any Map", async () => {
@@ -71,6 +72,31 @@ describe("LatencyTracker — no module-load side effects", () => {
     LatencyTracker.reset();
 
     expect(mapCtorCalls).toBe(0);
+  });
+
+  it("importing the module does not create the default logger", async () => {
+    vi.resetModules();
+    const logger = {
+      debug: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      isLevelEnabled: vi.fn(() => true),
+      warn: vi.fn(),
+    };
+    const createConsoleLogger = vi.fn(() => logger);
+    vi.doMock("../../src/utils/logger.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("../../src/utils/logger.js")>();
+      return { ...actual, createConsoleLogger };
+    });
+
+    const mod = await import("../../src/utils/profiling.js");
+
+    expect(createConsoleLogger).not.toHaveBeenCalled();
+
+    mod.LatencyTracker.startLatencyMeasure("lazy-logger");
+    mod.LatencyTracker.startLatencyMeasure("lazy-logger");
+
+    expect(createConsoleLogger).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -148,13 +174,13 @@ describe("LatencyTracker — start / stop / stats", () => {
   });
 
   it("log() does not throw when no measures have been recorded", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     expect(() => LatencyTracker.log()).not.toThrow();
     expect(logSpy).not.toHaveBeenCalled();
   });
 
   it("log() emits one line per tracked measure", () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
     LatencyTracker.startLatencyMeasure("a");
     LatencyTracker.stopLatencyMeasure("a");
@@ -163,5 +189,9 @@ describe("LatencyTracker — start / stop / stats", () => {
     LatencyTracker.log();
 
     expect(logSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("setLogger rejects malformed logger objects", () => {
+    expect(() => LatencyTracker.setLogger({ warn() {} } as never)).toThrow(TypeError);
   });
 });

@@ -17,17 +17,13 @@ OJIN_API_KEY=sk-...
 Because this SDK is a **Node/server-only** package, the API key is handled exclusively on
 the backend. It must not be bundled into a browser-side application or exposed to end users.
 
-## Session Tokens (v1.5+)
+## Session Tokens
 
-Once short-lived session tokens are available (v1.5 and later), the following rules apply:
-
-- **Do not store session tokens in `localStorage` or `sessionStorage`.** Both are accessible
-  to any JavaScript running on the same origin; an XSS vulnerability would allow exfiltration.
-- **Preferred alternatives:**
-  - Keep the token in memory (a module-scoped variable or framework state) and discard it
-    when the session ends.
-  - Use a short-lived, `HttpOnly` cookie set by your own server if you need the token to
-    survive a page refresh.
+Do not store Ojin session tokens in `localStorage` or any other long-lived browser storage.
+Keep tokens server-side. For browser-facing applications, prefer issuing short-lived
+session credentials from your backend through a short-lived, `HttpOnly`, `Secure`,
+`SameSite` cookie scoped to the minimum path required. Use in-memory browser storage only
+as a last-resort, well-justified exception, and keep TTLs minimal.
 
 ## Reporting a Vulnerability
 

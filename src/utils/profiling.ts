@@ -1,3 +1,5 @@
+import { createConsoleLogger, type OjinLogger } from "./logger.js";
+
 /** Track frames-per-second statistics for streaming workloads. */
 export class FPSTracker {
   private lastUpdateTime: number;
@@ -10,7 +12,10 @@ export class FPSTracker {
   readonly fpsHistory: number[] = [];
   readonly partialFpsHistory: number[] = [];
 
-  constructor(public readonly id: string) {
+  constructor(
+    public readonly id: string,
+    private readonly logger: OjinLogger = createConsoleLogger("info"),
+  ) {
     this.lastUpdateTime = performance.now() - 40;
     this.lastPartialTime = performance.now() - 40;
     this.start();
@@ -71,7 +76,7 @@ export class FPSTracker {
 
   /** Log current statistics. */
   log(): void {
-    console.log(
+    this.logger.info(
       `${this.id} : FPS=${this.averageFps.toFixed(4)} PartialFPS: ${this.partialAverageFps.toFixed(4)} total_frames:${this.totalFrames} partial_frames:${this.partialFrames}`,
     );
     this.partialFrames = 0;
@@ -91,6 +96,7 @@ interface LatencyMeasure {
 /** Tracker that collects latency measurements by ID. */
 // biome-ignore lint/complexity/noStaticOnlyClass: public profiling API intentionally exposes static utility methods.
 export class LatencyTracker {
+  private static _logger?: OjinLogger;
   // Backing fields — undefined until first access so that importing this module
   // has no top-level side effects (required for Rollup preserveModules tree-shaking).
   private static _measures?: Map<string, LatencyMeasure[]>;
@@ -119,6 +125,12 @@ export class LatencyTracker {
     if (LatencyTracker._sampleMin === undefined) LatencyTracker._sampleMin = new Map();
     return LatencyTracker._sampleMin;
   }
+  private static get logger(): OjinLogger {
+    if (LatencyTracker._logger === undefined) {
+      LatencyTracker._logger = createConsoleLogger("info");
+    }
+    return LatencyTracker._logger;
+  }
 
   /** Clear accumulated latency state. */
   static reset(): void {
@@ -129,6 +141,21 @@ export class LatencyTracker {
     LatencyTracker._sampleTotals = undefined;
     LatencyTracker._sampleMax = undefined;
     LatencyTracker._sampleMin = undefined;
+  }
+
+  /** Replace the logger used by warning and summary output. */
+  static setLogger(logger: OjinLogger): void {
+    if (
+      logger == null ||
+      typeof logger.debug !== "function" ||
+      typeof logger.info !== "function" ||
+      typeof logger.warn !== "function" ||
+      typeof logger.error !== "function" ||
+      typeof logger.isLevelEnabled !== "function"
+    ) {
+      throw new TypeError("LatencyTracker.setLogger expects an OjinLogger-compatible object");
+    }
+    LatencyTracker._logger = logger;
   }
 
   private static recordSample(measureId: string, durationMs: number): void {
@@ -154,7 +181,9 @@ export class LatencyTracker {
     existing = existing.filter((m) => m.endTime === 0);
 
     if (existing.length > 0) {
-      console.warn(`Latency measure ${measureId} is already running, discarding older one`);
+      LatencyTracker.logger.warn(
+        `Latency measure ${measureId} is already running, discarding older one`,
+      );
       existing.pop();
     }
 
@@ -201,7 +230,7 @@ export class LatencyTracker {
   static log(): void {
     for (const [measureId, count] of LatencyTracker.sampleCounts) {
       if (count === 0) continue;
-      console.log(
+      LatencyTracker.logger.info(
         `Latency ${measureId} NumMeasures: ${count} Avg: ${(LatencyTracker.average(measureId)).toFixed(4)}ms Max: ${(LatencyTracker.max(measureId)).toFixed(4)}ms Min: ${(LatencyTracker.min(measureId)).toFixed(4)}ms`,
       );
     }

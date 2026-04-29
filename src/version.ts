@@ -1,2 +1,2 @@
-/** The current version of the ojin-client SDK package. Auto-populated from package.json at build time. */
-export const version = "0.1.0";
+/** The current version of the @ojinai/js-sdk package. */
+export const version = "1.0.0-rc";

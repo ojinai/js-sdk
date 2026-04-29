@@ -48,7 +48,7 @@ describe("OjinClient cancellation", () => {
 
   // ── Test 1: connect() retry-loop abort ──────────────────────────────────────
 
-  it("close() aborts the in-flight reconnect backoff sleep within 60 ms", {
+  it("close() aborts the in-flight reconnect backoff sleep within 60 ms of close", {
     timeout: 500,
   }, async () => {
     // fail fast if we do hang
@@ -62,19 +62,22 @@ describe("OjinClient cancellation", () => {
       // reconnectAttempts / reconnectDelay removed (legacy — v1.0 uses hardcoded defaults)
     });
 
-    const start = Date.now();
-
     // Kick off connect (it will fail and sleep for ~1 s between retries).
     const connectPromise = client.connect();
 
-    // Abort after 50 ms — well inside the 60 ms budget.
-    setTimeout(() => void client.close(), 50);
+    // Abort after 50 ms so connect() has time to enter its retry sleep.
+    let closeStartedAt = 0;
+    setTimeout(() => {
+      closeStartedAt = Date.now();
+      void client.close();
+    }, 50);
 
     // connect() must reject (not hang for 10 s).
     await expect(connectPromise).rejects.toThrow();
 
-    // Total wall-clock time must be under 60 ms.
-    expect(Date.now() - start).toBeLessThan(60);
+    // Once close() starts, abort propagation must be prompt.
+    expect(closeStartedAt).not.toBe(0);
+    expect(Date.now() - closeStartedAt).toBeLessThan(60);
   });
 
   // ── Test 2: sleep() direct abort ────────────────────────────────────────────

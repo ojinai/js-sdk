@@ -4,7 +4,7 @@ import { MessageType } from "./session-messages.js";
 // ─── Binary protocol constants ───────────────────────────────────────────────
 
 // Interaction input format: Byte payload type, uint64 timestamp, uint32 params size
-const INTERACTION_INPUT_HEADER_SIZE = 1 + 8 + 4; // 13 bytes
+export const INTERACTION_INPUT_HEADER_SIZE = 1 + 8 + 4; // 13 bytes
 
 // Interaction response format: Byte is_final, 16b UUID, uint64 timestamp,
 // uint32 usage, uint32 index, uint32 num payload entries
@@ -25,19 +25,6 @@ function writeUint32BE(buf: Uint8Array, offset: number, value: number): void {
 function readUint32BE(buf: Uint8Array, offset: number): number {
   return (
     ((buf[offset] << 24) | (buf[offset + 1] << 16) | (buf[offset + 2] << 8) | buf[offset + 3]) >>> 0
-  );
-}
-
-function writeUint32LE(buf: Uint8Array, offset: number, value: number): void {
-  buf[offset] = value & 0xff;
-  buf[offset + 1] = (value >>> 8) & 0xff;
-  buf[offset + 2] = (value >>> 16) & 0xff;
-  buf[offset + 3] = (value >>> 24) & 0xff;
-}
-
-function readUint32LE(buf: Uint8Array, offset: number): number {
-  return (
-    (buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24)) >>> 0
   );
 }
 
@@ -244,7 +231,7 @@ export function serializeInteractionResponseMessage(msg: InteractionResponseMess
 
   for (const entry of msg.payload.payloads) {
     const pt = payloadTypeFromStr(entry.payloadType);
-    writeUint32LE(result, offset, entry.data.length);
+    writeUint32BE(result, offset, entry.data.length);
     offset += 4;
     result[offset] = pt;
     offset += 1;
@@ -280,7 +267,7 @@ export function deserializeInteractionResponseMessage(
     if (data.length < offset + PAYLOAD_ENTRY_HEADER_SIZE) {
       throw new Error("Invalid data: truncated payload entry header");
     }
-    const dataSize = readUint32LE(data, offset);
+    const dataSize = readUint32BE(data, offset);
     const payloadTypeInt = data[offset + 4];
     offset += PAYLOAD_ENTRY_HEADER_SIZE;
 

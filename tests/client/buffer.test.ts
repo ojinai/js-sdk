@@ -16,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { WebSocket as WS } from "ws";
 import { WebSocketServer } from "ws";
 import {
-  ConnectionState,
   OjinClient,
   OjinError,
   OjinErrorCode,
@@ -269,14 +268,10 @@ describe("outgoingQueue config + QueueFullError overflow modes", () => {
 
     // Server drops the connection without ever sending session.ready.
     latestServerWs?.terminate();
-    await waitUntil(() => client.connectionState === ConnectionState.Disconnected, 3000);
+    await waitUntil(() => connectionCount >= 2, 3000);
 
     // The pre-ready buffer must still contain the two pending messages.
     expect(received).toHaveLength(0);
-
-    // Reconnect on the same client instance (fresh transport, fresh abort ctrl).
-    await client.connect();
-    await waitUntil(() => connectionCount >= 2);
 
     // Server sends session.ready on the new connection — queue must flush.
     latestServerWs?.send(sessionReadyFrame());

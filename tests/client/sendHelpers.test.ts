@@ -1,6 +1,7 @@
 /**
  * Tests for the OjinClient convenience sender methods (ost-s8z9):
- *   sendText, sendAudio, interrupt, endInteraction.
+ *   sendText, sendTextTurn, sendTextTurnAndWait, streamTextTurn,
+ *   sendAudio, interrupt, endInteraction.
  *
  * These methods are ergonomic wrappers over `sendMessage` that construct the
  * appropriate message objects.  The tests verify:
@@ -11,14 +12,22 @@
  *  - Optional `params` are forwarded without modification.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ConnectionError,
+  DisconnectReason,
+  FrameType,
   OjinAudioInputMessage,
   OjinCancelInteractionMessage,
   OjinClient,
   OjinEndInteractionMessage,
+  OjinErrorCode,
+  OjinEvent,
+  OjinInteractionResponseMessage,
+  OjinSessionReadyMessage,
   OjinTextInputMessage,
 } from "../../src/index.js";
+import { NIL_UUID } from "../../src/utils/uuid.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -46,6 +55,10 @@ function omitTimestamp(value: unknown): unknown {
 
 describe("OjinClient convenience senders", () => {
   let client: OjinClient;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   beforeEach(() => {
     client = new OjinClient({
@@ -100,6 +113,379 @@ describe("OjinClient convenience senders", () => {
     });
   });
 
+  // ── sendTextTurn ─────────────────────────────────────────────────────────────
+
+  describe("sendTextTurn", () => {
+    it("sends a text message followed by endInteraction", async () => {
+      await client.sendTextTurn("hello");
+
+      expect(client.sendMessage).toHaveBeenCalledTimes(2);
+      const [textArg, endArg] = vi.mocked(client.sendMessage).mock.calls.map((call) => call[0]);
+      expect(textArg).toBeInstanceOf(OjinTextInputMessage);
+      expect(endArg).toBeInstanceOf(OjinEndInteractionMessage);
+    });
+
+    it("forwards params through the text message", async () => {
+      const params = { language: "en", speed: 1.2 };
+      await client.sendTextTurn("hello", params);
+
+      const arg = vi.mocked(client.sendMessage).mock.calls[0][0] as OjinTextInputMessage;
+      expect(arg.params).toEqual(params);
+    });
+
+    it("stops before endInteraction if sending the text message fails", async () => {
+      const failure = new Error("boom");
+      vi.mocked(client.sendMessage).mockRejectedValueOnce(failure);
+
+      await expect(client.sendTextTurn("hi")).rejects.toThrow("boom");
+      expect(client.sendMessage).toHaveBeenCalledOnce();
+      expect(vi.mocked(client.sendMessage).mock.calls[0][0]).toBeInstanceOf(OjinTextInputMessage);
+    });
+
+    it("serializes concurrent text turns so text/end pairs do not interleave", async () => {
+      const sent: string[] = [];
+      let releaseFirstText!: () => void;
+
+      vi.mocked(client.sendMessage).mockImplementation(async (message) => {
+        if (message instanceof OjinTextInputMessage) {
+          sent.push(`text:${message.text}`);
+          if (message.text === "first") {
+            await new Promise<void>((resolve) => {
+              releaseFirstText = resolve;
+            });
+          }
+          return;
+        }
+        if (message instanceof OjinEndInteractionMessage) {
+          sent.push("end");
+        }
+      });
+
+      const first = client.sendTextTurn("first");
+      await Promise.resolve();
+      const second = client.sendTextTurn("second");
+      await Promise.resolve();
+
+      expect(sent).toEqual(["text:first"]);
+
+      releaseFirstText();
+      await Promise.all([first, second]);
+
+      expect(sent).toEqual(["text:first", "end", "text:second", "end"]);
+    });
+
+    it("returns Promise<void> for the full text turn", async () => {
+      await expect(client.sendTextTurn("hi")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("sendTextTurnAndWait", () => {
+    it("waits for the final speech frame of the same interaction", async () => {
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
+
+      const result = client.sendTextTurnAndWait(
+        "hello",
+        { language: "en" },
+        { readyTimeoutMs: 45_000, responseTimeoutMs: 2_000 },
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const idle = new OjinInteractionResponseMessage(
+        NIL_UUID,
+        new Uint8Array(0),
+        new Uint8Array(0),
+        false,
+        0,
+        FrameType.Idle,
+      );
+      const partial = new OjinInteractionResponseMessage(
+        "550e8400-e29b-41d4-a716-446655440000",
+        new Uint8Array(0),
+        new Uint8Array([1, 2]),
+        false,
+        1,
+      );
+      const final = new OjinInteractionResponseMessage(
+        "550e8400-e29b-41d4-a716-446655440000",
+        new Uint8Array(0),
+        new Uint8Array([3, 4]),
+        true,
+        2,
+      );
+
+      client.events.emit(OjinEvent.InteractionResponse, idle);
+      client.events.emit(OjinEvent.InteractionResponse, partial);
+      client.events.emit(OjinEvent.InteractionResponse, final);
+
+      await expect(result).resolves.toBe(final);
+      expect(client.waitForReady).toHaveBeenCalledWith(45_000);
+      expect(client.sendTextTurn).toHaveBeenCalledWith("hello", { language: "en" });
+    });
+
+    it("rejects overlapping waiters on the same client", async () => {
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
+
+      const first = client.sendTextTurnAndWait("first");
+      await Promise.resolve();
+
+      await expect(client.sendTextTurnAndWait("second")).rejects.toThrow(
+        "High-level text turn helpers do not support concurrent calls on the same client.",
+      );
+
+      client.events.emit(
+        OjinEvent.InteractionResponse,
+        new OjinInteractionResponseMessage(
+          "550e8400-e29b-41d4-a716-446655440000",
+          new Uint8Array(0),
+          new Uint8Array([1]),
+          true,
+          0,
+        ),
+      );
+
+      await expect(first).resolves.toBeInstanceOf(OjinInteractionResponseMessage);
+    });
+
+    it("rejects with TimeoutError when no final speech frame arrives", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
+
+      const result = client.sendTextTurnAndWait("hello", undefined, { responseTimeoutMs: 1_000 });
+      const assertion = expect(result).rejects.toMatchObject({
+        code: OjinErrorCode.Timeout,
+      });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await assertion;
+    });
+
+    it("ignores speech frames and starts the response timeout only after the turn is sent", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      let finishSendTextTurn!: () => void;
+      vi.spyOn(client, "sendTextTurn").mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishSendTextTurn = resolve;
+        }),
+      );
+
+      const result = client.sendTextTurnAndWait("hello", undefined, { responseTimeoutMs: 1_000 });
+      await Promise.resolve();
+
+      client.events.emit(
+        OjinEvent.InteractionResponse,
+        new OjinInteractionResponseMessage(
+          "11111111-1111-4111-8111-111111111111",
+          new Uint8Array(0),
+          new Uint8Array([1]),
+          true,
+          0,
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      finishSendTextTurn();
+      await Promise.resolve();
+
+      const assertion = expect(result).rejects.toMatchObject({ code: OjinErrorCode.Timeout });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await assertion;
+    });
+
+    it("rejects when the connection closes before the final frame arrives", async () => {
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
+
+      const result = client.sendTextTurnAndWait("hello");
+      await Promise.resolve();
+
+      client.events.emit(OjinEvent.ConnectionClosed, {
+        code: 1006,
+        reason: "socket lost",
+        disconnectReason: DisconnectReason.ConnectionLost,
+      });
+
+      await expect(result).rejects.toBeInstanceOf(ConnectionError);
+      await expect(result).rejects.toMatchObject({ code: OjinErrorCode.NotConnected });
+    });
+  });
+
+  describe("streamTextTurn", () => {
+    it("yields speech frames for the turn and completes after the final frame", async () => {
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
+
+      const stream = client.streamTextTurn(
+        "hello",
+        { language: "en" },
+        { readyTimeoutMs: 45_000, responseTimeoutMs: 2_000 },
+      );
+
+      const first = stream.next();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      client.events.emit(
+        OjinEvent.InteractionResponse,
+        new OjinInteractionResponseMessage(
+          NIL_UUID,
+          new Uint8Array(0),
+          new Uint8Array(0),
+          false,
+          0,
+          FrameType.Idle,
+        ),
+      );
+
+      const partial = new OjinInteractionResponseMessage(
+        "550e8400-e29b-41d4-a716-446655440000",
+        new Uint8Array(0),
+        new Uint8Array([1, 2]),
+        false,
+        1,
+      );
+      client.events.emit(OjinEvent.InteractionResponse, partial);
+      await expect(first).resolves.toEqual({ value: partial, done: false });
+
+      const second = stream.next();
+      const final = new OjinInteractionResponseMessage(
+        "550e8400-e29b-41d4-a716-446655440000",
+        new Uint8Array(0),
+        new Uint8Array([3, 4]),
+        true,
+        2,
+      );
+      client.events.emit(OjinEvent.InteractionResponse, final);
+
+      await expect(second).resolves.toEqual({ value: final, done: false });
+      await expect(stream.next()).resolves.toEqual({ value: undefined, done: true });
+      expect(client.waitForReady).toHaveBeenCalledWith(45_000);
+      expect(client.sendTextTurn).toHaveBeenCalledWith("hello", { language: "en" });
+    });
+
+    it("rejects overlapping helpers on the same client", async () => {
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
+
+      const stream = client.streamTextTurn("first");
+      const first = stream.next();
+      await Promise.resolve();
+
+      await expect(client.sendTextTurnAndWait("second")).rejects.toThrow(
+        "High-level text turn helpers do not support concurrent calls on the same client.",
+      );
+
+      client.events.emit(
+        OjinEvent.InteractionResponse,
+        new OjinInteractionResponseMessage(
+          "550e8400-e29b-41d4-a716-446655440000",
+          new Uint8Array(0),
+          new Uint8Array([1]),
+          true,
+          0,
+        ),
+      );
+
+      await expect(first).resolves.toEqual({
+        value: expect.any(OjinInteractionResponseMessage),
+        done: false,
+      });
+      await expect(stream.next()).resolves.toEqual({ value: undefined, done: true });
+    });
+
+    it("rejects when no speech frame arrives before the timeout", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
+
+      const stream = client.streamTextTurn("hello", undefined, { responseTimeoutMs: 1_000 });
+      const next = stream.next();
+      const assertion = expect(next).rejects.toMatchObject({ code: OjinErrorCode.Timeout });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await assertion;
+    });
+
+    it("uses responseTimeoutMs as a total deadline across streamed frames", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      vi.spyOn(client, "sendTextTurn").mockResolvedValue(undefined);
+
+      const stream = client.streamTextTurn("hello", undefined, { responseTimeoutMs: 1_000 });
+      const first = stream.next();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const partial = new OjinInteractionResponseMessage(
+        "550e8400-e29b-41d4-a716-446655440000",
+        new Uint8Array(0),
+        new Uint8Array([1]),
+        false,
+        1,
+      );
+
+      client.events.emit(OjinEvent.InteractionResponse, partial);
+      await expect(first).resolves.toEqual({ value: partial, done: false });
+
+      const second = stream.next();
+      const assertion = expect(second).rejects.toMatchObject({
+        code: OjinErrorCode.Timeout,
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await assertion;
+    });
+
+    it("ignores speech frames and starts the response timeout only after the turn is sent", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(client, "waitForReady").mockResolvedValue(new OjinSessionReadyMessage({}));
+      let finishSendTextTurn!: () => void;
+      vi.spyOn(client, "sendTextTurn").mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishSendTextTurn = resolve;
+        }),
+      );
+
+      const stream = client.streamTextTurn("hello", undefined, { responseTimeoutMs: 1_000 });
+      const first = stream.next();
+      await Promise.resolve();
+
+      client.events.emit(
+        OjinEvent.InteractionResponse,
+        new OjinInteractionResponseMessage(
+          "11111111-1111-4111-8111-111111111111",
+          new Uint8Array(0),
+          new Uint8Array([1]),
+          true,
+          0,
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      finishSendTextTurn();
+      await Promise.resolve();
+
+      const partial = new OjinInteractionResponseMessage(
+        "550e8400-e29b-41d4-a716-446655440000",
+        new Uint8Array(0),
+        new Uint8Array([2]),
+        false,
+        1,
+      );
+      client.events.emit(OjinEvent.InteractionResponse, partial);
+
+      await expect(first).resolves.toEqual({ value: partial, done: false });
+      await stream.return?.();
+    });
+  });
+
   // ── sendAudio ─────────────────────────────────────────────────────────────────
 
   describe("sendAudio", () => {
@@ -117,7 +503,7 @@ describe("OjinClient convenience senders", () => {
       await client.sendAudio(pcm);
 
       const arg = vi.mocked(client.sendMessage).mock.calls[0][0] as OjinAudioInputMessage;
-      const direct = new OjinAudioInputMessage(pcm as Uint8Array<ArrayBuffer>);
+      const direct = new OjinAudioInputMessage(pcm);
 
       expect(omitTimestamp(arg.toMessage())).toEqual(omitTimestamp(direct.toMessage()));
     });
@@ -130,7 +516,7 @@ describe("OjinClient convenience senders", () => {
       const arg = vi.mocked(client.sendMessage).mock.calls[0][0] as OjinAudioInputMessage;
       expect(arg.params).toEqual(params);
       // Structural equality with direct construction using same params
-      const direct = new OjinAudioInputMessage(pcm as Uint8Array<ArrayBuffer>, params);
+      const direct = new OjinAudioInputMessage(pcm, params);
       expect(omitTimestamp(arg.toMessage())).toEqual(omitTimestamp(direct.toMessage()));
     });
   });

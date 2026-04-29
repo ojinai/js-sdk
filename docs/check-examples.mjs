@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * Type-checks every TypeScript code block in docs/recipes/*.md against the
- * local dist types (dist/esm/index.d.ts). Run via:
+ * Type-checks every TypeScript code block in README.md and docs/recipes/*.md
+ * against the local dist types (dist/esm/index.d.ts). Run via:
  *
  *   pnpm docs:check-examples
  *
  * Algorithm:
- *   1. Scan docs/recipes/*.md for ```typescript ... ``` blocks.
+ *   1. Scan README.md and docs/recipes/*.md for ```ts / ```typescript blocks.
  *   2. Write each block to a temp .ts file in .docs-check/ (project root).
- *   3. Generate a temp tsconfig that maps "ojin-client" → dist/esm/index.d.ts.
+ *   3. Generate a temp tsconfig that maps both package names to dist types.
  *   4. Run `tsc --noEmit --project .docs-check-tsconfig.json`.
  *   5. Clean up and exit with the tsc exit code.
  *
@@ -16,9 +16,9 @@
  * ```typescript (e.g. ```ts-ignore or plain ```text).
  */
 
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { join, dirname } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,20 +31,36 @@ const tsconfigPath = join(rootDir, ".docs-check-tsconfig.json");
 /** @param {string} markdown */
 function extractTsBlocks(markdown) {
   const blocks = [];
-  // Match ```typescript\n...\n``` — strict opening fence only
-  const regex = /^```typescript\n([\s\S]*?)^```/gm;
-  let match;
-  while ((match = regex.exec(markdown)) !== null) {
+  // Match ```ts\n...\n``` and ```typescript\n...\n``` blocks.
+  const regex = /^```(?:ts|typescript)\n([\s\S]*?)^```/gm;
+  for (let match = regex.exec(markdown); match !== null; match = regex.exec(markdown)) {
     blocks.push(match[1].trimEnd());
   }
   return blocks;
+}
+
+/**
+ * README contains illustrative API snippets outside the runnable quickstart.
+ * Keep the checker focused on the quickstart section there; recipe docs still
+ * validate every TypeScript fence.
+ *
+ * @param {string} relativePath
+ * @param {string} markdown
+ */
+function extractCheckableBlocks(relativePath, markdown) {
+  const sourceMarkdown =
+    relativePath === "README.md"
+      ? (markdown.match(/^## Quick Start\n([\s\S]*?)^## Concepts$/m)?.[1] ?? markdown)
+      : markdown;
+
+  return extractTsBlocks(sourceMarkdown).filter((block) => block.includes("import "));
 }
 
 // Clean up any leftover artefacts from a previous interrupted run.
 rmSync(checkDir, { recursive: true, force: true });
 rmSync(tsconfigPath, { force: true });
 
-// Collect all recipe files.
+// Collect all markdown files whose code examples should stay release-safe.
 let recipeFiles;
 try {
   recipeFiles = readdirSync(recipesDir).filter((f) => f.endsWith(".md"));
@@ -52,30 +68,39 @@ try {
   console.error(`docs/recipes/ directory not found (expected at ${recipesDir})`);
   process.exit(1);
 }
+const sourceFiles = [
+  join(rootDir, "README.md"),
+  ...recipeFiles.map((file) => join(recipesDir, file)),
+];
 
 // Extract and write code blocks to temp files.
 mkdirSync(checkDir, { recursive: true });
 const tempFiles = [];
+const markdownFilesWithBlocks = new Set();
 
-for (const file of recipeFiles) {
-  const content = readFileSync(join(recipesDir, file), "utf-8");
-  const blocks = extractTsBlocks(content);
+for (const sourceFile of sourceFiles) {
+  const content = readFileSync(sourceFile, "utf-8");
+  const relativePath = relative(rootDir, sourceFile);
+  const blocks = extractCheckableBlocks(relativePath, content);
   for (let i = 0; i < blocks.length; i++) {
-    const name = `${file.replace(/\.md$/, "")}-${i}.ts`;
-    writeFileSync(join(checkDir, name), blocks[i] + "\n");
+    const name = `${relativePath.replace(/[/.]/g, "-")}-${i}.ts`;
+    writeFileSync(join(checkDir, name), `${blocks[i]}\n`);
     tempFiles.push(`.docs-check/${name}`);
+    markdownFilesWithBlocks.add(relativePath);
   }
 }
 
 if (tempFiles.length === 0) {
-  console.error("No ```typescript code blocks found in docs/recipes/*.md");
+  console.error("No ```ts or ```typescript code blocks found in README.md or docs/recipes/*.md");
   rmSync(checkDir, { recursive: true, force: true });
   process.exit(1);
 }
 
-console.log(`Checking ${tempFiles.length} code block(s) from ${recipeFiles.length} recipe file(s)…`);
+console.log(
+  `Checking ${tempFiles.length} code block(s) from ${markdownFilesWithBlocks.size} markdown file(s)...`,
+);
 
-// Write a temp tsconfig that maps "ojin-client" to the local dist types.
+// Write a temp tsconfig that maps both package names to the local dist types.
 // baseUrl "." is relative to this tsconfig's location (project root), so the
 // path value "dist/esm/index.d.ts" resolves correctly.
 const tsconfig = {
@@ -86,8 +111,12 @@ const tsconfig = {
     strict: true,
     noEmit: true,
     baseUrl: ".",
-    paths: { "ojin-client": ["dist/esm/index.d.ts"] },
+    paths: {
+      "ojin-client": ["dist/esm/index.d.ts"],
+      "@ojinai/js-sdk": ["dist/esm/index.d.ts"],
+    },
     lib: ["ES2022"],
+    types: ["node"],
   },
   files: tempFiles,
 };

@@ -79,8 +79,8 @@ export class OjinSessionReadyPing extends OjinServerMessage {}
 export class OjinInteractionResponseMessage extends OjinServerMessage {
   constructor(
     public readonly interactionId: string,
-    public readonly videoFrameBytes: Uint8Array<ArrayBuffer>,
-    public readonly audioFrameBytes: Uint8Array<ArrayBuffer>,
+    public readonly videoFrameBytes: Uint8Array,
+    public readonly audioFrameBytes: Uint8Array,
     public readonly isFinalResponse: boolean = false,
     public readonly index: number,
     public readonly frameType: FrameType = FrameType.Speech,
@@ -92,14 +92,14 @@ export class OjinInteractionResponseMessage extends OjinServerMessage {
   static fromProxyMessage(
     proxyMessage: InteractionResponseMessage,
   ): OjinInteractionResponseMessage {
-    let videoFrameBytes = new Uint8Array(0);
-    let audioFrameBytes = new Uint8Array(0);
+    let videoFrameBytes: Uint8Array = new Uint8Array(0);
+    let audioFrameBytes: Uint8Array = new Uint8Array(0);
 
     for (const entry of proxyMessage.payload.payloads) {
       if (entry.payloadType === "image") {
-        videoFrameBytes = entry.data as Uint8Array<ArrayBuffer>;
+        videoFrameBytes = entry.data;
       } else if (entry.payloadType === "audio") {
-        audioFrameBytes = entry.data as Uint8Array<ArrayBuffer>;
+        audioFrameBytes = entry.data;
       }
     }
 
@@ -197,7 +197,7 @@ export class OjinTextInputMessage extends OjinClientMessage {
 /** Message containing audio input for the persona. */
 export class OjinAudioInputMessage extends OjinClientMessage {
   constructor(
-    public readonly audioInt16Bytes: Uint8Array<ArrayBuffer>,
+    public readonly audioInt16Bytes: Uint8Array,
     public readonly params?: Record<string, unknown> | null,
   ) {
     super();

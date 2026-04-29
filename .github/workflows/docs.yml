@@ -36,7 +36,7 @@ jobs:
       # treatWarningsAsErrors is set in typedoc.json so this step is the gate.
       # The --json output is consumed by the JSDoc-coverage step below.
       - name: Build docs (treatWarningsAsErrors)
-        run: pnpm docs
+        run: pnpm run docs
 
       - name: Verify docs/api/index.html was produced
         run: |

@@ -9,13 +9,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocketServer, type WebSocket as WsSocket } from "ws";
-import {
-  deserializeInteractionInputMessage,
-  MessageType,
-  OjinAudioInputMessage,
-  OjinClient,
-  OjinEvent,
-} from "../../src/index.js";
+import { OjinAudioInputMessage, OjinClient, OjinEvent } from "../../src/index.js";
+import { deserializeInteractionInputMessage } from "../../src/protocol/interaction-messages.js";
+import { MessageType } from "../../src/protocol/session-messages.js";
 
 // ─── Sentinel constants ───────────────────────────────────────────────────────
 
@@ -150,11 +146,7 @@ describe.skipIf(typeof Buffer === "undefined")("Node Buffer slice-integrity", ()
     // ── Part 1: send the pool-backed Buffer slice (AC3) ─────────────────────
 
     const slicePayloadPromise = nextPayload();
-    // Buffer is a Uint8Array subclass; the cast is only needed for TS generic
-    // strictness and is erased at runtime.
-    await client.sendMessage(
-      new OjinAudioInputMessage(slice as unknown as Uint8Array<ArrayBuffer>),
-    );
+    await client.sendMessage(new OjinAudioInputMessage(slice));
     const slicePayload = await withTimeout(slicePayloadPromise, 3000);
 
     // AC4.1 — exact payload length: only the 16 slice bytes arrive.
@@ -192,9 +184,7 @@ describe.skipIf(typeof Buffer === "undefined")("Node Buffer slice-integrity", ()
     const pool = makePool();
     const slice = Buffer.from(pool.buffer, pool.byteOffset + 32, 16);
 
-    const serialized = new OjinAudioInputMessage(
-      slice as unknown as Uint8Array<ArrayBuffer>,
-    ).toBytes();
+    const serialized = new OjinAudioInputMessage(slice).toBytes();
 
     // Deserialize to isolate the audio payload section.
     const deserialized = deserializeInteractionInputMessage(serialized);

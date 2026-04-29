@@ -117,6 +117,7 @@ describe("InteractionResponseMessage serialization", () => {
     expect(deserialized.payload.timestamp).toBe(123456);
     expect(deserialized.payload.usage).toBe(42);
     expect(deserialized.payload.index).toBe(7);
+    expect(Array.from(bytes.slice(37, 42))).toEqual([0x00, 0x00, 0x00, 0x03, PayloadType.Image]);
   });
 
   it("should round-trip a final response with nil UUID", () => {

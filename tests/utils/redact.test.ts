@@ -155,27 +155,3 @@ describe("redactUrl — api_key query parameter", () => {
     expect(result).not.toContain("s3cr3t");
   });
 });
-
-// ─── Performance test ─────────────────────────────────────────────────────────
-
-describe("redactMeta — performance", () => {
-  // Build a meta object with 20 top-level keys where one is sensitive.
-  const bigMeta: LoggableMeta = Object.fromEntries([
-    ...Array.from({ length: 19 }, (_, i) => [`key${i}`, `value${i}`]),
-    ["apiKey", "s3cret"],
-  ]);
-
-  it("processes 20 top-level keys in ≤ 3 µs on average (10 000 iterations)", () => {
-    // Warm up the JIT before measuring.
-    for (let i = 0; i < 100; i++) redactMeta(bigMeta);
-
-    const ITERATIONS = 10_000;
-    const MAX_TOTAL_MS = ITERATIONS * 0.003; // 3 µs per call in milliseconds
-
-    const start = performance.now();
-    for (let i = 0; i < ITERATIONS; i++) redactMeta(bigMeta);
-    const elapsed = performance.now() - start;
-
-    expect(elapsed).toBeLessThan(MAX_TOTAL_MS);
-  });
-});

@@ -62,6 +62,13 @@ function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function sendSessionReady(ws: WS | null): void {
+  if (ws === null) {
+    throw new Error("server WebSocket not connected");
+  }
+  ws.send(sessionReadyFrame());
+}
+
 // ── Shared fixture ────────────────────────────────────────────────────────────
 
 describe("RATE_LIMITED single-retry with 200 ms backoff", () => {
@@ -125,7 +132,7 @@ describe("RATE_LIMITED single-retry with 200 ms backoff", () => {
     await client.connect();
     await waitUntil(() => serverWs !== null);
 
-    serverWs!.send(sessionReadyFrame());
+    sendSessionReady(serverWs);
     await waitUntil(() => client.isServerReady);
 
     // Send one message; the server will respond with RATE_LIMITED.
@@ -168,7 +175,7 @@ describe("RATE_LIMITED single-retry with 200 ms backoff", () => {
     await client.connect();
     await waitUntil(() => serverWs !== null);
 
-    serverWs!.send(sessionReadyFrame());
+    sendSessionReady(serverWs);
     await waitUntil(() => client.isServerReady);
 
     void client.sendMessage(new OjinTextInputMessage("hello"));
@@ -214,7 +221,7 @@ describe("RATE_LIMITED single-retry with 200 ms backoff", () => {
     await client.connect();
     await waitUntil(() => serverWs !== null);
 
-    serverWs!.send(sessionReadyFrame());
+    sendSessionReady(serverWs);
     await waitUntil(() => client.isServerReady);
 
     void client.sendMessage(new OjinTextInputMessage("hello"));
