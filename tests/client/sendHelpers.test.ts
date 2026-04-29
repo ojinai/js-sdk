@@ -311,10 +311,8 @@ describe("OjinClient convenience senders", () => {
         disconnectReason: DisconnectReason.ConnectionLost,
       });
 
-      await result.catch((error) => {
-        expect(error).toBeInstanceOf(ConnectionError);
-        expect(error).toMatchObject({ code: OjinErrorCode.NotConnected });
-      });
+      await expect(result).rejects.toBeInstanceOf(ConnectionError);
+      await expect(result).rejects.toMatchObject({ code: OjinErrorCode.NotConnected });
     });
   });
 
