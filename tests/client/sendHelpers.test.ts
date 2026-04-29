@@ -142,6 +142,38 @@ describe("OjinClient convenience senders", () => {
       expect(vi.mocked(client.sendMessage).mock.calls[0][0]).toBeInstanceOf(OjinTextInputMessage);
     });
 
+    it("serializes concurrent text turns so text/end pairs do not interleave", async () => {
+      const sent: string[] = [];
+      let releaseFirstText!: () => void;
+
+      vi.mocked(client.sendMessage).mockImplementation(async (message) => {
+        if (message instanceof OjinTextInputMessage) {
+          sent.push(`text:${message.text}`);
+          if (message.text === "first") {
+            await new Promise<void>((resolve) => {
+              releaseFirstText = resolve;
+            });
+          }
+          return;
+        }
+        if (message instanceof OjinEndInteractionMessage) {
+          sent.push("end");
+        }
+      });
+
+      const first = client.sendTextTurn("first");
+      await Promise.resolve();
+      const second = client.sendTextTurn("second");
+      await Promise.resolve();
+
+      expect(sent).toEqual(["text:first"]);
+
+      releaseFirstText();
+      await Promise.all([first, second]);
+
+      expect(sent).toEqual(["text:first", "end", "text:second", "end"]);
+    });
+
     it("returns Promise<void> for the full text turn", async () => {
       await expect(client.sendTextTurn("hi")).resolves.toBeUndefined();
     });

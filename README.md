@@ -178,12 +178,12 @@ typed payload shown below.
 
 | Event | Payload | When it fires |
 | ----- | ------- | ------------- |
-| `connectionStateChanged` | `ConnectionState` | Any connection state transition |
-| `connectionOpened` | _(none)_ | WebSocket handshake complete |
+| `session.state_changed` | `ConnectionState` | Any connection state transition |
+| `connection.opened` | _(none)_ | WebSocket handshake complete |
 | `session.closed` | `{ code: number, reason: string, disconnectReason: DisconnectReason }` | Connection ended permanently |
-| `sessionReady` | `OjinSessionReadyMessage` | Inference server is ready for interactions |
-| `interactionResponse` | `OjinInteractionResponseMessage` | Video/audio frame received from server |
-| `error` | `OjinError` | SDK or server error (use `.code` for typed dispatch) |
+| `session.ready` | `OjinSessionReadyMessage` | Inference server is ready for interactions |
+| `interaction.response` | `OjinInteractionResponseMessage` | Video/audio frame received from server |
+| `interaction.error` | `OjinError` | SDK or server error (use `.code` for typed dispatch) |
 | `session.waiting_for_ready` | `{ configId: string, elapsedMs: number }` | First caller enters `waitForReady()` while server is not yet ready |
 
 Use `OjinEvent.*` constants rather than bare strings:

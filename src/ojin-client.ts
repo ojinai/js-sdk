@@ -160,6 +160,8 @@ export class OjinClient {
   private _rateLimitAttempts: number = 0;
   /** True while the 200 ms abortable retry sleep is in flight. */
   private _rateLimitSleeping: boolean = false;
+  /** Serializes convenience text turns so text/end pairs cannot interleave. */
+  private _textTurnQueue: Promise<void> = Promise.resolve();
   /** True while a high-level text-turn helper owns the shared response waiter. */
   private _textTurnWaitInFlight = false;
 
@@ -502,8 +504,10 @@ export class OjinClient {
    * @param params - Optional parameters forwarded to the interaction payload.
    */
   async sendTextTurn(text: string, params?: Record<string, unknown>): Promise<void> {
-    await this.sendText(text, params);
-    await this.endInteraction();
+    return this.enqueueTextTurn(async () => {
+      await this.sendText(text, params);
+      await this.endInteraction();
+    });
   }
 
   /**
@@ -820,6 +824,15 @@ export class OjinClient {
 
   isConnected(): boolean {
     return this.transport?.isOpen ?? false;
+  }
+
+  private enqueueTextTurn<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this._textTurnQueue.then(operation, operation);
+    this._textTurnQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   private waitForFinalSpeechResponse(responseTimeoutMs: number): {
